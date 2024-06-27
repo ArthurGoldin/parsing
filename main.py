@@ -62,3 +62,23 @@ if auth_token:
               graphql_response.status_code)
 else:
     print("Authorization token is not available. Cannot proceed with GraphQL request.")
+
+print(headers)
+headers["Connection"] = "1"
+print(headers)
+
+
+def conditional_yield(n):
+    for i in range(n):
+        if i % 2 == 0:
+            yield i, i ** 2  # Yielding a tuple of (number, number squared)
+
+
+# Calling the generator function
+for number, square in conditional_yield(10):
+    print(f"Number: {number}, Square: {square}")
+
+n = 10
+pre_allocated_list = [None] * n
+print(pre_allocated_list)
+print(len(pre_allocated_list))

@@ -7,7 +7,25 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger()
 
 
-def generate_graphql_query(save_json=False, **kwargs):
+def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, showAdultContent: str = "TRUE",
+                        filters: list = None, sort: str = "BY_RELEVANCE_DESC", correctQuery: bool = False,
+                        getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:
+    if filters is None:
+        filters = []
+
+    data["variables"]["queryInput"]["categoryId"] = category_id
+    data["variables"]["queryInput"]["pagination"]["offset"] = offset
+    data["variables"]["queryInput"]["pagination"]["limit"] = limit
+    data["variables"]["queryInput"]["showAdultContent"] = showAdultContent
+    data["variables"]["queryInput"]["filters"] = filters
+    data["variables"]["queryInput"]["sort"] = sort
+    data["variables"]["queryInput"]["correctQuery"] = correctQuery
+    data["variables"]["queryInput"]["getFastCategories"] = getFastCategories
+    data["variables"]["queryInput"]["fastCategoriesLevelOffset"] = fastCategoriesLevelOffset
+    data["variables"]["queryInput"]["getPromotionItems"] = getPromotionItems
+
+
+def generate_query(save_json=False, **kwargs):
     defaults = {
         "offset": 0,
         "limit": 1,
@@ -173,4 +191,4 @@ def generate_graphql_query(save_json=False, **kwargs):
 
 
 if __name__ == "__main__":
-    generate_graphql_query(True)
+    generate_query(True)

@@ -1,6 +1,4 @@
 import undetected_chromedriver as uc
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -12,9 +10,7 @@ import pandas as pd
 import logging
 
 from get_token import get_token_instance
-from get_token import load_saved_token
-from graphql_query_code import generate_graphql_query
-
+import graphql_query_generator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -22,8 +18,39 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger()
 
 
+def load_category_tree(file_path: str):
+    """Load category tree from a JSON file."""
+    with open(file_path, 'r', encoding='utf-8') as file:
+        return json.load(file)
+
+
+def find_leaf_categories(category_tree):
+    """Recursively find all leaf categories in the category tree."""
+    leaf_categories = []
+
+    def traverse(node):
+        if not node['children']:
+            leaf_categories.append(node)
+        else:
+            for child in node['children']:
+                traverse(child)
+
+    traverse(category_tree)
+    return leaf_categories
+
+
+def combine_products_into_tree(category_tree, products_by_category):
+    """Combine fetched products into the category tree."""
+    def traverse(node):
+        node['products'] = products_by_category.get(node['id'], [])
+        for child in node['children']:
+            traverse(child)
+
+    traverse(category_tree)
+    return category_tree
+
+
 def get_token_with_retry(url, max_tries=5):
-    """Retry getting authorization token with a maximum number of attempts."""
     attempt = 0
     while attempt < max_tries:
         auth_token = get_token_instance(url)
@@ -32,31 +59,11 @@ def get_token_with_retry(url, max_tries=5):
         else:
             logger.info("No authorization token received. Retrying...")
         attempt += 1
-        time.sleep(attempt)
+        time.sleep(2)
     return None
 
 
-def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, showAdultContent: str = "TRUE",
-                        filters: list = None, sort: str = "BY_RELEVANCE_DESC", correctQuery: bool = False,
-                        getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:
-    """Set query variables for the GraphQL query."""
-    if filters is None:
-        filters = []
-
-    data["variables"]["queryInput"]["categoryId"] = category_id
-    data["variables"]["queryInput"]["pagination"]["offset"] = offset
-    data["variables"]["queryInput"]["pagination"]["limit"] = limit
-    data["variables"]["queryInput"]["showAdultContent"] = showAdultContent
-    data["variables"]["queryInput"]["filters"] = filters
-    data["variables"]["queryInput"]["sort"] = sort
-    data["variables"]["queryInput"]["correctQuery"] = correctQuery
-    data["variables"]["queryInput"]["getFastCategories"] = getFastCategories
-    data["variables"]["queryInput"]["fastCategoriesLevelOffset"] = fastCategoriesLevelOffset
-    data["variables"]["queryInput"]["getPromotionItems"] = getPromotionItems
-
-
 def generate_fetch_js_code(payload_json, auth_token, graphql_url="https://graphql.uzum.uz/"):
-    """Generate JavaScript code for fetching GraphQL data."""
     js_code = f"""
     const payload = {json.dumps(payload_json)};
     fetch("{graphql_url}", {{
@@ -99,7 +106,6 @@ def generate_fetch_js_code(payload_json, auth_token, graphql_url="https://graphq
 
 
 def get_data_from_json(file: dict) -> list:
-    """Extract relevant data from JSON response."""
     data_list = []
     for item in file["data"]["makeSearch"]["items"]:
         prId = item.get("catalogCard").get("productId")
@@ -123,7 +129,6 @@ def get_data_from_json(file: dict) -> list:
 
 
 def save_excel(data: list, filename: str):
-    """Save data to an Excel file."""
     try:
         df = pd.DataFrame(data)
         writer = pd.ExcelWriter(f'{filename}.xlsx')
@@ -144,18 +149,17 @@ def save_excel(data: list, filename: str):
 
 
 def check_response_with_retry(response: dict) -> bool:
-    """Check the GraphQL response and handle errors."""
     if response is not None:
         if 'errors' in response:
             unauthorized = any(
-                error.get('extensions', {}).get('code') == 'UNAUTHORIZED' or
-                error.get('message') == 'Unauthorized'
+                error.get('extensions', {}).get(
+                    'code') == 'UNAUTHORIZED' or error.get('message') == 'Unauthorized'
                 for error in response['errors']
             )
             if unauthorized:
                 logger.error(
                     "Error: Authorization token is declined. Getting a new token...")
-                auth_token = get_token_with_retry(url=main_url)
+                auth_token = get_token_with_retry(service=None, url=main_url)
                 if auth_token is None:
                     logger.error(
                         "Can't retrieve authorization token! Shutting down...")
@@ -170,90 +174,18 @@ def check_response_with_retry(response: dict) -> bool:
         return False
 
 
-# def generate_fetch_item_data_js_code(item_ids, auth_token):
-#     """Generate JavaScript code to fetch additional data for each item in reverse order."""
-#     js_code = f"""
-#     const itemIds = {json.dumps(item_ids)}.reverse();
-#     const results = [];
-#     const fetchData = async (id) => {{
-#         try {{
-#             const fetch_response = await fetch(`https://api.uzum.uz/api/v2/product/397154`, {{
-#                 method: 'GET',
-#                 headers: {{
-#                     "accept": "application/json",
-#                     "accept-encoding": "gzip, deflate, br, zstd",
-#                     "accept-language": "ru-RU",
-#                     "authorization": "Bearer {auth_token}",
-#                     "baggage": "sentry-environment=production,sentry-release=uzum-market@1.25.0,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=20c3acab11b94f68860e6d50f5443bfc",
-#                     "content-type": "application/json",
-#                     "origin": "https://uzum.uz",
-#                     "priority": "u=1, i",
-#                     "referer": "https://uzum.uz/",
-#                     "sec-ch-ua": "\\"Google Chrome\\";v=\\"125\\", \\"Chromium\\";v=\\"125\\", \\"Not.A/Brand\\";v=\\"24\\"",
-#                     "sec-ch-ua-mobile": "?0",
-#                     "sec-ch-ua-platform": "Windows",
-#                     "sec-fetch-dest": "empty",
-#                     "sec-fetch-mode": "cors",
-#                     "sec-fetch-site": "same-site",
-#                     "sentry-trace": "20c3acab11b94f68860e6d50f5443bfc-a9bccd7d1c44f880-0",
-#                     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-#                     "x-iid": "8d8f8d7a-2d63-4668-8655-3e56f88c710c"
-#                 }}
-#             }});
-#             if (fetch_response.ok) {{
-#                 const data = await fetch_response.json();
-#                 results.push({{ id, data }});
-#             }} else {{
-#                 const errorText = await fetch_response.text();
-#                 console.error(`HTTP error! status: ${{fetch_response.status}}, fetch_response: ${{errorText}}`);
-#                 results.push({{ id, error: `HTTP error! status: ${{fetch_response.status}}` }});
-#             }}
-#         }} catch (error) {{
-#             console.error(`Error fetching data for item ${{id}}:`, error);
-#             results.push({{ id, error: error.message }});
-#         }}
-#     }};
-#     const fetchAllData = async () => {{
-#         for (const id of itemIds) {{
-#             await fetchData(id);
-#         }}
-#         window.itemData = results;
-#         console.log('All item data fetched:', results);
-#     }};
-#     fetchAllData();
-#     """
-#     return js_code
+def fetch_products_for_category(driver: uc.Chrome, category_id: int, auth_token: str, main_url: str = "https://uzum.uz/ru/", graphql_url: str = "https://graphql.uzum.uz/", data_dir: str = "data"):
 
-
-main_url = "https://uzum.uz/ru"
-graphql_url = "https://graphql.uzum.uz/"
-category_id = "12690"
-data_dir = "data"
-
-try:
-    # options = uc.ChromeOptions()
-
-    # auth_token = get_token_with_retry(url=main_url)
-    auth_token = None  # load_saved_token()
-    if auth_token is None:
-        auth_token = get_token_instance(
-            url=main_url, max_retries=5, save_token=True)
-        if auth_token is None:
-            logger.error(
-                "Can't retrieve authorization token! Shutting down...")
-            exit()
-
-    driver = uc.Chrome()  # (options=options)
-
-    payload_json = generate_graphql_query()
+    payload_json = graphql_query_generator.generate_query()
 
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
     # Run first query to get variables values and check connection
-    set_query_variables(payload_json, category_id, 0,
-                        0, sort="BY_ORDERS_NUMBER_DESC")
-    js_code = generate_fetch_js_code(payload_json, auth_token, graphql_url)
+    graphql_query_generator.set_query_variables(payload_json, category_id, 0,
+                                                0, sort="BY_ORDERS_NUMBER_DESC")
+    js_code = generate_fetch_js_code(
+        payload_json, auth_token, graphql_url)
 
     driver.get(main_url)
     WebDriverWait(driver, 20).until(EC.title_contains("Uzum Market"))
@@ -268,7 +200,7 @@ try:
     if check_response_with_retry(response):
         is_done = False
         category_name = response["data"]["makeSearch"]["category"]["title"]
-        total_items = 100  # response["data"]["makeSearch"]["total"]
+        total_items = 1  # response["data"]["makeSearch"]["total"]
         items_collected = 0
         items_offset = 0
         logger.info("First response received.")
@@ -278,16 +210,18 @@ try:
     data_list = []
 
     while not is_done:
-        set_query_variables(payload_json, category_id,
-                            items_offset, 100, sort="BY_ORDERS_NUMBER_DESC")
-        js_code = generate_fetch_js_code(payload_json, auth_token, graphql_url)
+        graphql_query_generator.set_query_variables(payload_json, category_id,
+                                                    items_offset, 1, sort="BY_ORDERS_NUMBER_DESC")
+        js_code = generate_fetch_js_code(
+            payload_json, auth_token, graphql_url)
 
         driver.get(main_url)
         driver.execute_script(js_code)
 
         WebDriverWait(driver, 20).until(lambda d: d.execute_script(
             "return window.graphqlResponse") is not None)
-        response = driver.execute_script("return window.graphqlResponse;")
+        response = driver.execute_script(
+            "return window.graphqlResponse;")
 
         if check_response_with_retry(response):
             data_list.extend(get_data_from_json(response))
@@ -295,6 +229,8 @@ try:
             items_offset += min(100, total_items - items_collected)
             logger.info(f'Collected {items_collected} of total {
                         total_items} items in {category_name}.')
+            # with open('json.json', 'w', encoding='utf-8') as json_file:
+            #     json.dump(response, json_file, ensure_ascii=False, indent=4)
         else:
             break
 
@@ -320,32 +256,44 @@ try:
 
         save_excel(data_list, excel_file_name)
 
-        # item_ids = [item['id'] for item in data_list]
-        # js_code = generate_fetch_item_data_js_code(item_ids, auth_token)
-        # driver.execute_script(js_code)
-        # WebDriverWait(driver, 60).until(
-        #     lambda d: d.execute_script("return window.itemData") is not None)
-        # item_data = driver.execute_script("return window.itemData")
-
-        # # Save item data to JSON
-        # item_data_file_name = os.path.join(
-        #     data_dir, f'item_data_{current_time}.json')
-        # with open(item_data_file_name, 'w', encoding='utf-8') as json_file:
-        #     json.dump(item_data, json_file, indent=4, ensure_ascii=False)
-        # logger.info(f"Item data saved to {item_data_file_name}")
-
     else:
-        logger.info(f"No items collected from category {category_name}")
+        logger.info(f"No items collected from category {
+                    category_name}")
 
-except Exception as e:
-    logger.error(f"Error in driver: {e}")
-finally:
+
+if __name__ == "__main__":
+    main_url = "https://uzum.uz/ru"
+    graphql_url = "https://graphql.uzum.uz/"
+    category_id = "12690"
+    data_dir = "data"
+    auth_token = None
     try:
-        for handle in driver.window_handles[:-1]:
-            driver.switch_to.window(handle)
-            logger.info("Closing %s" % driver.current_url)
-            driver.close()
-        driver.close()
-        driver.quit()
+        # auth_token = get_token_with_retry(url=main_url)
+        auth_token = get_token_instance(main_url, 4)
+        if auth_token is None:
+            logger.error(
+                "Can't retrieve authorization token! Shutting down...")
+            exit()
+
     except Exception as e:
-        logger.error(f"Error during driver quit: {e}")
+        logger.error(
+            f"In uzum_parser.main: something went wrong during retrieving authorization token: {e}")
+
+    options = uc.ChromeOptions()
+
+    try:
+        driver = uc.Chrome(options=options)
+        fetch_products_for_category(driver, category_id, auth_token,
+                                    main_url, graphql_url, data_dir)
+
+    except Exception as e:
+        logger.error(f"Error in uzum_parser: {e}")
+    finally:
+        try:
+            for handle in driver.window_handles[:-1]:
+                driver.switch_to.window(handle)
+                logger.info("Closing %s" % driver.current_url)
+                driver.close()
+            driver.quit()
+        except Exception as e:
+            logger.error(f"Error during driver quit: {e}")

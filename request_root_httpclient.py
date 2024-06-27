@@ -1,22 +1,24 @@
 import http.client
-from bs4 import BeautifulSoup
+import json
 import zlib
 import brotli
 
 # Define the host and the endpoint
-host = 'uzum.uz'
-endpoint = '/ru/'
+host = 'api.uzum.uz'
+endpoint = '/api/main/root-categories?eco=false'
 
 # Define the headers
 headers = {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+    'authority': 'api.uzum.uz',
+    'Accept': 'application/json',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'Accept-Language': 'ru-RU',
+    'Authorization': 'Bearer ',  # Include the actual token if needed
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
 }
 
 
-def decompress_response(response_data, encoding):
+def decompress_http_response(response_data, encoding):
     if encoding == 'gzip':
         return zlib.decompress(response_data, zlib.MAX_WBITS | 16)
     elif encoding == 'deflate':
@@ -44,22 +46,29 @@ try:
 
     # Decompress the response data if necessary
     if content_encoding:
-        response_data = decompress_response(response_data, content_encoding)
+        response_data = decompress_http_response(
+            response_data, content_encoding)
 
     # Decode the response data
     decoded_data = response_data.decode('utf-8')
 
+    # Print the raw response data for debugging
     print("Status:", response.status)
+    # print("Raw response data:", decoded_data)
 
-    # Parse the HTML using BeautifulSoup
-    soup = BeautifulSoup(decoded_data, 'html.parser')
+    # Check if response data is empty
+    if not decoded_data:
+        raise ValueError("Empty response data")
 
-    # Extract the title
-    title = soup.title.string if soup.title else 'No title found'
-    print("Page Title:", title)
+    # Parse the JSON data
+    json_data = json.loads(decoded_data)
+
+    # Save the JSON data to a file
+    with open('response1.json', 'w', encoding='utf-8') as json_file:
+        json.dump(json_data, json_file, ensure_ascii=False, indent=4)
 
 except Exception as e:
     print(f"Error: {e}")
 finally:
-    # Ensure the connection is closed if it wasn't closed in the try block
+    # Ensure the connection is closed
     conn.close()

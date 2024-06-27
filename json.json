@@ -1,0 +1,159 @@
+{
+    "data": {
+        "makeSearch": {
+            "category": {
+                "id": 12690,
+                "title": "Смартфоны"
+            },
+            "items": [
+                {
+                    "__typename": "Item",
+                    "adMarker": null,
+                    "bidId": 0,
+                    "catalogCard": {
+                        "__typename": "SkuGroupCard",
+                        "adult": false,
+                        "badges": [
+                            {
+                                "__typename": "BottomTextBadge",
+                                "backgroundColor": "#FF0E87",
+                                "description": "",
+                                "id": 277,
+                                "link": null,
+                                "text": "Рассрочка ↓х2",
+                                "textColor": "#FFFFFF"
+                            },
+                            {
+                                "__typename": "BottomTextBadge",
+                                "backgroundColor": "#2F006B",
+                                "description": "",
+                                "id": 246,
+                                "link": null,
+                                "text": "Original",
+                                "textColor": "#FFFF00"
+                            },
+                            {
+                                "__typename": "BottomTextBadge",
+                                "backgroundColor": "#FFFF00",
+                                "description": "",
+                                "id": 274,
+                                "link": null,
+                                "text": "Распродажа",
+                                "textColor": "#202020"
+                            },
+                            {
+                                "__typename": "UzumInstallmentTitleBadge",
+                                "backgroundColor": "#FFFF00",
+                                "id": 41,
+                                "text": "122 900 сум/мес",
+                                "textColor": "#1F1F26"
+                            }
+                        ],
+                        "characteristicValues": [
+                            {
+                                "__typename": "CharacteristicValue",
+                                "characteristic": {
+                                    "__typename": "ProductCharacteristic",
+                                    "id": -1,
+                                    "title": "Цвет",
+                                    "values": [
+                                        {
+                                            "__typename": "CharacteristicValue",
+                                            "id": -281,
+                                            "title": "Светло-синий",
+                                            "value": "#9CBFE2"
+                                        },
+                                        {
+                                            "__typename": "CharacteristicValue",
+                                            "id": -283,
+                                            "title": "Сиреневый",
+                                            "value": "#C8A2C8"
+                                        },
+                                        {
+                                            "__typename": "CharacteristicValue",
+                                            "id": -1,
+                                            "title": "Черный",
+                                            "value": "#000000"
+                                        }
+                                    ]
+                                },
+                                "id": -1,
+                                "title": "Черный",
+                                "value": "#000000"
+                            }
+                        ],
+                        "favorite": false,
+                        "feedbackQuantity": 271,
+                        "id": 480215,
+                        "minFullPrice": 1932000,
+                        "minSellPrice": 1229000,
+                        "offer": null,
+                        "ordersQuantity": 500,
+                        "photos": [
+                            {
+                                "__typename": "Photo",
+                                "key": "cpjdtejmdtjnp7395tt0",
+                                "link": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cpjdtejmdtjnp7395tt0/t_product_540_high.jpg",
+                                    "low": "https://images.uzum.uz/cpjdtejmdtjnp7395tt0/t_product_540_low.jpg"
+                                },
+                                "previewLink": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cpjdtejmdtjnp7395tt0/t_product_240_high.jpg",
+                                    "low": "https://images.uzum.uz/cpjdtejmdtjnp7395tt0/t_product_240_low.jpg"
+                                }
+                            },
+                            {
+                                "__typename": "Photo",
+                                "key": "cp27sjfj2e4ghqnrclog",
+                                "link": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjfj2e4ghqnrclog/t_product_540_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjfj2e4ghqnrclog/t_product_540_low.jpg"
+                                },
+                                "previewLink": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjfj2e4ghqnrclog/t_product_240_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjfj2e4ghqnrclog/t_product_240_low.jpg"
+                                }
+                            },
+                            {
+                                "__typename": "Photo",
+                                "key": "cp27sjfj2e4ghqnrclo0",
+                                "link": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjfj2e4ghqnrclo0/t_product_540_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjfj2e4ghqnrclo0/t_product_540_low.jpg"
+                                },
+                                "previewLink": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjfj2e4ghqnrclo0/t_product_240_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjfj2e4ghqnrclo0/t_product_240_low.jpg"
+                                }
+                            },
+                            {
+                                "__typename": "Photo",
+                                "key": "cp27sjnj2e4ghqnrclp0",
+                                "link": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjnj2e4ghqnrclp0/t_product_540_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjnj2e4ghqnrclp0/t_product_540_low.jpg"
+                                },
+                                "previewLink": {
+                                    "__typename": "PhotoLink",
+                                    "high": "https://images.uzum.uz/cp27sjnj2e4ghqnrclp0/t_product_240_high.jpg",
+                                    "low": "https://images.uzum.uz/cp27sjnj2e4ghqnrclp0/t_product_240_low.jpg"
+                                }
+                            }
+                        ],
+                        "productId": 397154,
+                        "rating": 4.9,
+                        "title": "Смартфон Tecno Pop 7, 2/64 ГБ, 2 Sim, аккумулятор 5000 мА/ч"
+                    }
+                }
+            ],
+            "total": 1288
+        }
+    }
+}

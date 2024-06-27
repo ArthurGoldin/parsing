@@ -1,9 +1,6 @@
 import undetected_chromedriver as uc
-# from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
 import json
 import pprint
 import os
@@ -25,7 +22,7 @@ def load_saved_token(name="uzum"):
         with open(file_path, 'r') as file:
             file_contents = file.read()
         logger.info("Authorization token loaded successfully.")
-        return (file_contents)
+        return file_contents
     else:
         logger.info("Authorization token does not exist, getting a new one...")
         return None
@@ -50,7 +47,6 @@ def get_token_instance(url="https://uzum.uz/ru", max_retries=0, save_token=False
     Retrieve an authorization token by navigating to a URL and processing network logs.
 
     Args:
-        service (Service, optional): Selenium Service object. Defaults to None.
         url (str, optional): URL to navigate to. Defaults to "https://uzum.uz/ru".
         save_token (bool, optional): Whether to save the token to a file. Defaults to False.
         save_cookies (bool, optional): Whether to save cookies to a file. Defaults to False.
@@ -61,13 +57,6 @@ def get_token_instance(url="https://uzum.uz/ru", max_retries=0, save_token=False
     """
     chrome_options = uc.ChromeOptions()
     chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-
-    # # Initialize the ChromeDriver service
-    # if service is None:
-    # #     service = Service()
-    # service = Service(ChromeDriverManager().install())
-    # driver = uc.Chrome(service=service, options=chrome_options)
-    driver = uc.Chrome(options=chrome_options)
 
     def find_key(data, target="authorization"):
         """Recursively search for the target key in nested dictionaries and lists."""
@@ -107,7 +96,9 @@ def get_token_instance(url="https://uzum.uz/ru", max_retries=0, save_token=False
 
     token = None
     attempt_count = 0
+    driver = None
     try:
+        driver = uc.Chrome(options=chrome_options)
         while attempt_count <= max_retries:
             driver.get(url)
 
@@ -134,39 +125,33 @@ def get_token_instance(url="https://uzum.uz/ru", max_retries=0, save_token=False
                         if not os.path.exists(token_directory):
                             os.makedirs(token_directory)
 
-                        out_name = os.path.join(token_directory, f"token_{
-                                                subdomain}.txt")
+                        out_name = os.path.join(
+                            token_directory, f"token_{subdomain}.txt")
                         with open(out_name, "wt") as out:
                             pprint.pprint(token, stream=out)
                     break
                 else:
                     logger.info("No authorization token received. Retrying...")
             else:
-                logger.warning(f"Logs were not captured in attempt: {
+                logger.warning(f"Logs were not captured in attempt number: {
                                attempt_count}")
             attempt_count += 1
             time.sleep(attempt_count)
     except Exception as e:
         logger.error(f"Error in get_token_instance: {e}")
     finally:
-        try:
-            for handle in driver.window_handles[:-1]:
-                driver.switch_to.window(handle)
-                print("look. %s is closing" % driver.current_url)
-                # sleep(1)
-                driver.close()
-            driver.close()
-            driver.quit()
-        except Exception as e:
-            logger.error(f"Error during driver quit: {e}")
-    if token is None:
-        logger.info(f"Couldn't retrieve an authorization token after {
-                    max_retries + 1} attempts.")
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception as e:
+                logger.error(f"Error during driver quit: {e}")
+        if token is None:
+            logger.info(f"Couldn't retrieve an authorization token after {
+                        max_retries + 1} attempts.")
     return token
 
 
 if __name__ == "__main__":
-    # service = Service(ChromeDriverManager().install())
     token = get_token_instance()
     if token is not None:
         logger.info(f"Token received:\n{token}")
