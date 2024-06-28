@@ -334,8 +334,8 @@ def combine_products_into_tree(category_tree, products_by_category):
 
 
 def fetch_data(root_categories_flag=False):
-    if get_id
-    root_categories = get_root_categories()
+    if root_categories_flag:
+        root_categories = get_root_categories()
 
     global token_manager
     token_manager = TokenManager(
