@@ -64,17 +64,99 @@ def generate_query(save_json=False, **kwargs):
                     title
                 }
                 items {        
+                    adMarker {
+                        marker
+                        __typename
+                    }
                     catalogCard {
+                        __typename
                         ...SkuGroupCardFragment
                     }
+                    bidId
+                    __typename
                 }
+                total
             }
         }
         fragment SkuGroupCardFragment on SkuGroupCard {
             ...DefaultCardFragment
+            photos {
+                key
+                link(trans: PRODUCT_540) {
+                    high
+                    low
+                    __typename
+                }
+                previewLink: link(trans: PRODUCT_240) {
+                    high
+                    low
+                    __typename
+                }
+                __typename
+            }
+            badges {
+                ... on BottomTextBadge {
+                    backgroundColor
+                    description
+                    id
+                    link
+                    text
+                    textColor
+                    __typename
+                }
+                ... on UzumInstallmentTitleBadge {
+                    backgroundColor
+                    text
+                    id
+                    textColor
+                    __typename
+                }
+                __typename
+            }
+            characteristicValues {
+                id
+                value
+                title
+                characteristic {
+                    values {
+                        id
+                        title
+                        value
+                        __typename
+                    }
+                    title
+                    id
+                    __typename
+                }
+                __typename
+            }
+            __typename
         }
         fragment DefaultCardFragment on CatalogCard {
+            adult
+            favorite
+            feedbackQuantity
+            id
+            minFullPrice
+            minSellPrice
+            offer {
+                due
+                icon
+                text
+                textColor
+                __typename
+            }
+            badges {
+                backgroundColor
+                text
+                textColor
+                __typename
+            }
+            ordersQuantity
             productId
+            rating
+            title
+            __typename
         }
         """
     }
