@@ -178,6 +178,7 @@ def get_product_ids_by_category(category_id: int, amount: int) -> list:
                 headers['Authorization'] = f'Bearer {auth_token}'
             elif response.status == 429:
                 # Server blocking due to multiple requests
+                # Add some logic to bypass this
                 pass
             else:
                 raise ValueError(f"Bad response status on a GraphQL query: {
