@@ -1,2 +1,1 @@
-Convert graphql_query_generator to class
-Convert get token to class if needed
+Need to store category ids that were not saved

@@ -3,6 +3,7 @@ import time
 import json
 from datetime import datetime
 import os
+import glob
 import csv
 import pandas as pd
 import logging
@@ -73,7 +74,7 @@ def get_root_categories():
             if not decoded_data:
                 raise ValueError("Empty response data")
             root_categories = json.loads(decoded_data)
-            with open(f"data/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
+            with open(f"{data_dir}/root_categories/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
                 json.dump(root_categories, file, ensure_ascii=False, indent=4)
             logger.info(f'Collected root-categories from {main_url}')
         else:
@@ -96,7 +97,7 @@ def get_ids_from_json(json_data: dict) -> list:
     return product_ids
 
 
-def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, request_retries: int = 5, backoff_factor: int = 1) -> list:
+def get_product_ids_by_category(category_id: int, amount: int, page_limit: int = 100, request_retries: int = 8, backoff_factor: int = 1, save_category_ids: bool = False) -> list:
     global auth_token
     global token_manager
     headers = {
@@ -126,14 +127,12 @@ def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, req
 
     payload_json = graphql_query_generator.generate_query()
 
-    items_collected = 0
     items_offset = 0
     data_list = []
     request_attempts = 0
     done = False
-    amount = None
 
-    while not done and request_attempts < request_retries:
+    while not done and request_attempts <= request_retries:
         graphql_query_generator.set_query_variables(
             payload_json, category_id, items_offset, page_limit)
 
@@ -143,8 +142,6 @@ def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, req
                 payload_json), headers=headers)
             response = conn.getresponse()
             if response.status == 200:
-                request_attempts = 0
-
                 response_data = response.read()
                 content_encoding = response.getheader('Content-Encoding')
 
@@ -162,29 +159,38 @@ def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, req
                 if 'errors' in json_data:
                     error_messages = [
                         error.get('message', 'Unknown error') for error in json_data['errors']]
+                    error_429 = False
                     for error_message in error_messages:
                         logger.error(f'GraphQL Error: {error_message}')
-                    raise ValueError(f"GraphQL query failed with errors: {
-                                     error_messages}")
+                        if '429' in error_message:
+                            error_429 = True
+
+                    if error_429:
+                        logger.info(f"Attempt number {request_attempts}")
+                        wait_time = backoff_factor * (2 ** request_attempts)
+                        logger.info(f"Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                        request_attempts += 1
+                        continue
+                    # raise ValueError(f"GraphQL query failed with errors: {
+                    #                  error_messages}")
 
                 data = get_ids_from_json(json_data)
                 if len(data) > 0:
                     data_list.extend(data)
-                    if len(data_list) > 10000:
-                        done = True
-                        logger.info('Stopped collecting ids for debugging')
                 else:
                     done = True
                     amount = json_data.get("data", {}).get(
                         "makeSearch", {}).get("total")
-                    logger.info(f"Finished retrieving category ids. Total collected {
-                                len(data_list)} out of {amount} by GraphQl amount")
-
-                items_collected = len(data_list)
-                items_offset += page_limit
 
                 logger.info(f'Collected {len(data)} of total {
-                            items_collected} collected items in category {category_id}.')
+                            len(data_list)} collected items in category {category_id}')
+
+                items_offset += min(page_limit, amount - len(data_list))
+                if (len(data_list) >= amount):
+                    done = True
+
+                request_attempts = 0
 
             elif response.status == 401:  # authorization failed
                 logger.info(
@@ -212,16 +218,43 @@ def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, req
             conn.close()
 
     if len(data_list) != 0:
-        logger.info(f"Collected {len(data_list)
-                                 } ids of category {category_id}")
-
-        with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(data_list)
+        logger.info(f"Finished retrieving category ids. Total collected {
+            len(data_list)} out of {amount} in GraphQL in category {category_id}")
+        data_list = list(set(data_list))
+        logger.info(f"Total unique ids: {
+                    len(data_list)} in category {category_id}")
+        if save_category_ids:
+            with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(data_list)
     else:
-        logger.info(f"No items collected from category {category_id}")
+        logger.warning(f"No items collected from category {category_id}")
 
     return data_list
+
+
+def load_last_saved_root_categories(directory: str) -> dict:
+    try:
+        # Get list of all root_categories JSON files in the directory
+        list_of_files = glob.glob(os.path.join(
+            directory, 'root_categories_*.json'))
+        if not list_of_files:
+            raise FileNotFoundError(
+                "No root-categories files found in the directory.")
+
+        # Find the most recent file
+        latest_file = max(list_of_files, key=os.path.getctime)
+
+        # Load the JSON data from the file
+        with open(latest_file, 'r', encoding='utf-8') as file:
+            root_categories = json.load(file)
+
+        logging.info(f'Loaded root-categories from {latest_file}')
+        return root_categories
+
+    except Exception as e:
+        logging.error(f'Failed to load the last saved root-categories: {e}')
+        return None
 
 
 def load_category_tree(file_path: str):
@@ -235,13 +268,24 @@ def find_leaf_categories(category_tree):
     leaf_categories = []
 
     def traverse(node):
-        if not node['children']:
-            leaf_categories.append(node)
+        if 'children' in node:
+            if not node['children']:
+                leaf_categories.append(node)
+            else:
+                for child in node['children']:
+                    traverse(child)
         else:
-            for child in node['children']:
-                traverse(child)
+            logger.warning(f"No 'children' key found in node: {node.keys()}")
 
-    traverse(category_tree)
+    try:
+        if 'payload' in category_tree:
+            for item in category_tree['payload']:
+                traverse(item)
+        else:
+            logger.warning(
+                "No 'payload' key found in the root of the category tree.")
+    except Exception as e:
+        logger.error(f"Failed to find leaf categories: {e}")
     return leaf_categories
 
 
@@ -256,23 +300,76 @@ def combine_products_into_tree(category_tree, products_by_category):
     return category_tree
 
 
-def fetch_data(root_categories_flag=False):
-    if root_categories_flag:
+def fetch_data():
+    start_time = time.time()
+    try:
         root_categories = get_root_categories()
+        if root_categories is None:
+            logger.warning(f"Failed to fetch root-categories from {
+                main_url}, loading the most recent saved root-categories.")
+            root_categories = load_last_saved_root_categories(
+                f"{data_dir}/root_categories")
+            if root_categories is not None:
+                logger.info("Successfully loaded the root-categories.")
+            else:
+                raise FileNotFoundError("Failed to load root-categories.")
 
-    global token_manager
-    token_manager = TokenManager(
-        url=main_url,
-        max_retries=4,
-        save_token=False,
-        save_cookies=False
-    )
-    global auth_token
-    auth_token = token_manager.get_token_instance()
+        leaf_categories = find_leaf_categories(root_categories)
+        if leaf_categories:
+            logger.info(f"Extracted {len(leaf_categories)
+                                     } categories from root-categories.")
+            with open(f'{data_dir}/category_ids/leaf_categories_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='')as file:
+                writer = csv.writer(file)
+                writer.writerow(leaf_categories)
+                logger.info("Leaf category ids saved to a .csv file")
+        else:
+            raise AttributeError("Leaf categories not found")
 
-    if auth_token is not None:
-        category_ids = get_product_ids_by_category(
-            category_id=1)
+        global token_manager
+        token_manager = TokenManager(
+            url=main_url,
+            max_retries=4,
+            save_token=False,
+            save_cookies=False
+        )
+        global auth_token
+        auth_token = token_manager.get_token_instance()
+
+        if auth_token is not None:
+            product_ids = []
+            failed_categories = []
+            for category in leaf_categories:
+                category_ids = get_product_ids_by_category(
+                    category_id=category['id'], amount=category['productAmount'])
+                if len(category_ids) > 0:
+                    product_ids.extend(category_ids)
+                else:
+                    failed_categories.append(
+                        {"id": f"category['id']", "productAmount": f"category['productAmount']"})
+
+            logger.info(f"Total {len(product_ids)} ids fetched.")
+
+            product_ids = list(set(product_ids))
+            logger.info(f"Total unique ids fetched: {len(product_ids)}")
+            with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(product_ids)
+                logger.info("Product ids saved to a .csv file")
+
+            if failed_categories:
+                with open(f'{data_dir}/failed_categories_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(failed_categories)
+                    logger.info("Product ids saved to a .csv file")
+        else:
+            raise FileNotFoundError("Failed to get authorization token.")
+
+    except Exception as e:
+        logger.error(f"Could not fetch data: {e} Exiting...")
+    finally:
+        end_time = time.time()
+        logger.info(f"Total execution time: {
+                    (end_time - start_time):.2f} seconds")
 
 
 if __name__ == "__main__":
