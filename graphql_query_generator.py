@@ -28,12 +28,12 @@ def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: in
 def generate_query(save_json=False, **kwargs):
     defaults = {
         "offset": 0,
-        "limit": 1,
+        "limit": 100,
         "showAdultContent": "TRUE",
         "filters": "[]",
         "sort": "BY_RELEVANCE_DESC",
-        "correctQuery": "false",
-        "getFastCategories": "true",
+        "correctQuery": "true",
+        "getFastCategories": "false",
         "fastCategoriesLevelOffset": 2,
         "getPromotionItems": "true"
     }
@@ -48,9 +48,9 @@ def generate_query(save_json=False, **kwargs):
                 "sort": "BY_RELEVANCE_DESC",
                 "pagination": {
                     "offset": 0,
-                    "limit": 0
+                    "limit": 100
                 },
-                "correctQuery": False,
+                "correctQuery": True,
                 "getFastCategories": False,
                 "fastCategoriesLevelOffset": 0,
                 "getPromotionItems": False
@@ -68,6 +68,7 @@ def generate_query(save_json=False, **kwargs):
                         ...SkuGroupCardFragment
                     }
                 }
+                total
             }
         }
         fragment SkuGroupCardFragment on SkuGroupCard {

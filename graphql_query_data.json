@@ -1,0 +1,20 @@
+{
+    "operationName": "getMakeSearch",
+    "variables": {
+        "queryInput": {
+            "categoryId": null,
+            "pagination": {
+                "offset": 0,
+                "limit": 100
+            },
+            "showAdultContent": "TRUE",
+            "filters": "[]",
+            "sort": "BY_RELEVANCE_DESC",
+            "correctQuery": "false",
+            "getFastCategories": "true",
+            "fastCategoriesLevelOffset": 2,
+            "getPromotionItems": "true"
+        }
+    },
+    "query": "\n        query getMakeSearch($queryInput: MakeSearchQueryInput!) {\n            makeSearch(query: $queryInput) {\n                category {\n                    id\n                    title\n                }\n                items {        \n                    catalogCard {\n                        ...SkuGroupCardFragment\n                    }\n                }\n                total\n            }\n        }\n        fragment SkuGroupCardFragment on SkuGroupCard {\n            ...DefaultCardFragment\n        }\n        fragment DefaultCardFragment on CatalogCard {\n            productId\n        }\n        "
+}

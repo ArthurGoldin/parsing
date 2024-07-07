@@ -9,7 +9,6 @@ import logging
 import zlib
 import brotli
 
-
 from token_manager import TokenManager
 import graphql_query_generator
 
@@ -74,12 +73,12 @@ def get_root_categories():
             if not decoded_data:
                 raise ValueError("Empty response data")
             root_categories = json.loads(decoded_data)
-            with open(f"data/root_categories_{datetime.now().strftime("%Y%m%d_%H%M%S")}", 'w', encoding='utf-8') as file:
+            with open(f"data/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
                 json.dump(root_categories, file, ensure_ascii=False, indent=4)
             logger.info(f'Collected root-categories from {main_url}')
         else:
-            raise ValueError(f"HTTP error occurred while fetching root-categories: Status code {
-                response.status}")
+            raise ValueError(
+                f"HTTP error occurred while fetching root-categories: Status code {response.status}")
     except Exception as e:
         logger.error(e)
     finally:
@@ -94,14 +93,12 @@ def get_ids_from_json(json_data: dict) -> list:
     # Collect all productId values from the items
     product_ids = [item.get("catalogCard", {}).get(
         "productId") for item in items if "catalogCard" in item and "productId" in item["catalogCard"]]
-
     return product_ids
 
 
-def get_product_ids_by_category(category_id: int, amount: int) -> list:
+def get_product_ids_by_category(category_id: int = 1, page_limit: int = 100, request_retries: int = 5, backoff_factor: int = 1) -> list:
     global auth_token
     global token_manager
-    auth_token = "eyJraWQiOiIwcE9oTDBBVXlWSXF1V0w1U29NZTdzcVNhS2FqYzYzV1N5THZYb0ZhWXRNIiwiYWxnIjoiRWREU0EiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJVenVtIElEIiwiaWF0IjoxNzE5NTAwMzE3LCJzdWIiOiI1ZjBlMGY4Ny00YTMyLTQ3ZTEtYTMwOC1jZWNlN2M3Y2Y5ZGUiLCJhdWQiOlsidXp1bV9hcHBzIiwibWFya2V0L3dlYiJdLCJldmVudHMiOnt9LCJleHAiOjE3MTk1MDEwMzd9.Rb_hV1-eboflR5zxV3y_NbLQJ3HUIH9wc5BeJf_DLsjhG-hVT4Y6K4y5SAD9tp7hN_9hqzeUHCB33-XYfdKWBQ"
     headers = {
         'Accept': '*/*',
         'Accept-Language': 'ru-RU',
@@ -124,10 +121,7 @@ def get_product_ids_by_category(category_id: int, amount: int) -> list:
         'x-context': 'null',
         'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
     }
-    host = graphql_url.split('//')[1]
-    endpoint = '/'
-
-    host = 'graphql.uzum.uz'
+    host = graphql_url.split('//')[1].split('/')[0]
     endpoint = '/'
 
     payload_json = graphql_query_generator.generate_query()
@@ -135,10 +129,13 @@ def get_product_ids_by_category(category_id: int, amount: int) -> list:
     items_collected = 0
     items_offset = 0
     data_list = []
-    amount = 1
-    while items_collected < amount:
+    request_attempts = 0
+    done = False
+    amount = None
+
+    while not done and request_attempts < request_retries:
         graphql_query_generator.set_query_variables(
-            payload_json, category_id, items_offset, 3)
+            payload_json, category_id, items_offset, page_limit)
 
         conn = http.client.HTTPSConnection(host)
         try:
@@ -146,7 +143,8 @@ def get_product_ids_by_category(category_id: int, amount: int) -> list:
                 payload_json), headers=headers)
             response = conn.getresponse()
             if response.status == 200:
-                logger.info(f'Response status {response.status}')
+                request_attempts = 0
+
                 response_data = response.read()
                 content_encoding = response.getheader('Content-Encoding')
 
@@ -159,145 +157,69 @@ def get_product_ids_by_category(category_id: int, amount: int) -> list:
                     raise ValueError("Empty response data from graphql query")
 
                 json_data = json.loads(decoded_data)
-                data_list.extend(get_ids_from_json(json_data))
 
-                with open(f"data/category_ids_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding='utf-8') as json_file:
-                    json.dump(json_data, json_file,
-                              ensure_ascii=False, indent=4)
+                # Check for errors in the response
+                if 'errors' in json_data:
+                    error_messages = [
+                        error.get('message', 'Unknown error') for error in json_data['errors']]
+                    for error_message in error_messages:
+                        logger.error(f'GraphQL Error: {error_message}')
+                    raise ValueError(f"GraphQL query failed with errors: {
+                                     error_messages}")
+
+                data = get_ids_from_json(json_data)
+                if len(data) > 0:
+                    data_list.extend(data)
+                    if len(data_list) > 10000:
+                        done = True
+                        logger.info('Stopped collecting ids for debugging')
+                else:
+                    done = True
+                    amount = json_data.get("data", {}).get(
+                        "makeSearch", {}).get("total")
+                    logger.info(f"Finished retrieving category ids. Total collected {
+                                len(data_list)} out of {amount} by GraphQl amount")
 
                 items_collected = len(data_list)
-                items_offset += min(100, amount - items_collected)
+                items_offset += page_limit
 
-                logger.info(f'Collected {items_collected} of total {
-                            amount} items in category {category_id}.')
+                logger.info(f'Collected {len(data)} of total {
+                            items_collected} collected items in category {category_id}.')
 
             elif response.status == 401:  # authorization failed
                 logger.info(
                     f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
                 auth_token = token_manager.get_token_instance()
                 headers['Authorization'] = f'Bearer {auth_token}'
+                request_attempts += 1
             elif response.status == 429:
                 # Server blocking due to multiple requests
-                # Add some logic to bypass this
-                pass
+                logger.info(
+                    "429: Blocked by a server due to too many requests.")
+                logger.info(f"Attempt number {request_attempts}")
+                wait_time = backoff_factor * (2 ** request_attempts)
+                logger.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                request_attempts += 1
+                continue
             else:
                 raise ValueError(f"Bad response status on a GraphQL query: {
                                  response.status}")
-
         except Exception as e:
             logger.error(f'Failed to receive data from a GraphQl query: {e}')
+            break
         finally:
             conn.close()
 
     if len(data_list) != 0:
         logger.info(f"Collected {len(data_list)
                                  } ids of category {category_id}")
+
+        with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(data_list)
     else:
         logger.info(f"No items collected from category {category_id}")
-
-    return data_list
-
-
-def get_product_ids_by_category1(category_id: int, amount: int) -> list:
-    global auth_token
-    auth_token = "eyJraWQiOiIwcE9oTDBBVXlWSXF1V0w1U29NZTdzcVNhS2FqYzYzV1N5THZYb0ZhWXRNIiwiYWxnIjoiRWREU0EiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJVenVtIElEIiwiaWF0IjoxNzE5NTAwMzE3LCJzdWIiOiI1ZjBlMGY4Ny00YTMyLTQ3ZTEtYTMwOC1jZWNlN2M3Y2Y5ZGUiLCJhdWQiOlsidXp1bV9hcHBzIiwibWFya2V0L3dlYiJdLCJldmVudHMiOnt9LCJleHAiOjE3MTk1MDEwMzd9.Rb_hV1-eboflR5zxV3y_NbLQJ3HUIH9wc5BeJf_DLsjhG-hVT4Y6K4y5SAD9tp7hN_9hqzeUHCB33-XYfdKWBQ"
-    headers = {
-        'Accept': '*/*',
-        'Accept-Language': 'ru-RU',
-        'apollographql-client-name': 'web-customers',
-        'apollographql-client-version': '1.25.2',
-        'Authorization': f'Bearer {auth_token}',
-        'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
-        'Content-Type': 'application/json',
-        'Origin': f"{main_url}",
-        'Priority': 'u=1, i',
-        'Referer': f"{main_url}/",
-        'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"macOS"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-site',
-        'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'x-context': 'null',
-        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
-    }
-    host = graphql_url.split('//')[1]
-    endpoint = '/'
-
-    host = 'graphql.uzum.uz'
-    endpoint = '/'
-
-    payload_json = graphql_query_generator.generate_query()
-
-    amount = 1
-    items_collected = 0
-    items_offset = 0
-    data_list = []
-
-    try:
-        while items_collected < amount:
-
-            graphql_query_generator.set_query_variables(
-                payload_json, category_id, items_offset, 3)
-
-            conn = http.client.HTTPSConnection(host)
-            conn.request("POST", endpoint, json.dumps(
-                payload_json), headers=headers)
-            response = conn.getresponse()
-            if response.status == 200:
-                logger.info(f'Response status {response.status}')
-                response_data = response.read()
-                content_encoding = response.getheader('Content-Encoding')
-
-                if content_encoding:
-                    response_data = decompress_http_response(
-                        response_data, content_encoding)
-                decoded_data = response_data.decode('utf-8')
-
-                if not decoded_data:
-                    raise ValueError("Empty response data from graphql query")
-
-                # Remove this later
-                json_data = json.loads(decoded_data)
-
-                # Maybe allocate a list of size 'amount' for better performance
-                data_list.extend(get_ids_from_json(json_data))
-
-                with open(f"data/category_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json", "w", encoding='utf-') as json_file:
-                    json.dump(json_data, json_file,
-                              ensure_ascii=False, indent=4)
-
-                items_collected = len(data_list)
-                items_offset += min(100, amount - items_collected)
-
-                logger.info(f'Collected {items_collected} of total {
-                    amount} items in category {category_id}.')
-
-            elif response.status == 401:  # authorization failed
-                logger.info(
-                    f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
-                global token_manager
-                auth_token = token_manager.get_token_instance()
-                headers['Authorization'] = f'Bearer {auth_token}'
-            else:
-                raise ValueError(f"Bad response status on a GraphQL query: {
-                                 response.status}")
-            conn.close()
-
-    except Exception as e:
-        logger.error(f'Failed to receive data from a GraphQl query: {e}')
-    finally:
-        if conn.sock:
-            conn.close()
-
-    if len(data_list) != 0:
-        logger.info(f"Collected {len(data_list)
-                                 } ids of category {category_id}")
-    else:
-        logger.info(f"No items collected from category {
-                    category_id}")
 
     return data_list
 
@@ -350,7 +272,7 @@ def fetch_data(root_categories_flag=False):
 
     if auth_token is not None:
         category_ids = get_product_ids_by_category(
-            category_id=15335, amount=121)
+            category_id=1)
 
 
 if __name__ == "__main__":
@@ -359,14 +281,3 @@ if __name__ == "__main__":
         fetch_data()
     except Exception as e:
         logger.error(f'Data fetching failed: {e}')
-    # category_id = "12690"
-    # if not os.path.exists(data_dir):
-    #     os.makedirs(data_dir)
-
-    # try:
-    #     fetch_products_for_category(category_id, auth_token)
-
-    # except Exception as e:
-    #     logger.error(f"Error in uzum_parser.get_data_by_category: {e}")
-    # finally:
-    #     logger.info("Finished.")
