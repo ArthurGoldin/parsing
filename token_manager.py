@@ -4,14 +4,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 import json
 import pprint
 import os
-from datetime import datetime
 import pickle
 import logging
 import time
 
 
 class TokenManager:
-    def __init__(self, url="https://uzum.uz/ru", max_retries=0, save_token=False, save_cookies=False, cookies_path="cookies/cookies.pkl"):
+    def __init__(self, url="https://uzum.uz/ru", max_retries=5, save_token=False, save_cookies=False, cookies_path="cookies/cookies.pkl"):
         self.url = url
         self.max_retries = max_retries
         self.save_token = save_token
@@ -120,7 +119,7 @@ class TokenManager:
                     self.save_cookies_with_path(driver, self.cookies_path)
 
                 # Wait for performance logs to be available
-                WebDriverWait(driver, 10).until(
+                WebDriverWait(driver, 20).until(
                     lambda d: d.execute_script(
                         "return window.performance.getEntriesByType('resource').length > 0")
                 )
@@ -131,12 +130,12 @@ class TokenManager:
                     self.logger.info(
                         "Network logs received by chromedriver. Processing...")
                     token = self.process_browser_logs_for_network_events(logs)
-                    if token is not None:
+                    if token is not None and token != 'Promise]':
                         if self.save_token:
                             subdomain = self.extract_subdomain(self.url)
 
                             # Ensure the data directory exists
-                            token_directory = "token"
+                            token_directory = "data/token"
                             if not os.path.exists(token_directory):
                                 os.makedirs(token_directory)
 
@@ -144,6 +143,11 @@ class TokenManager:
                                 token_directory, f"token_{subdomain}.txt")
                             with open(out_name, "wt") as out:
                                 pprint.pprint(token, stream=out)
+
+                            # if token == 'Promise]':
+                            #     with open('logs.json', 'w', encoding='utf-8') as json_file:
+                            #         json.dump(logs, json_file,
+                            #                   ensure_ascii=False, indent=4)
                         break
                     else:
                         self.logger.info(
@@ -169,6 +173,7 @@ class TokenManager:
 
 if __name__ == "__main__":
     token_manager = TokenManager()
+    token_manager.save_token = True
     token = token_manager.get_token_instance()
     if token is not None:
         token_manager.logger.info(f"Token received:\n{token}")

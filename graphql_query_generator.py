@@ -7,9 +7,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger()
 
 
-def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, showAdultContent: str = "TRUE",
-                        filters: list = None, sort: str = "BY_RELEVANCE_DESC", correctQuery: bool = False,
-                        getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:
+def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, sort: str = "BY_RELEVANCE_DESC", showAdultContent: str = "TRUE", filters: list = [], correctQuery: bool = False, getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:
     if filters is None:
         filters = []
 

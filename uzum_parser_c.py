@@ -104,9 +104,9 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         'Accept': '*/*',
         'Accept-Language': 'ru-RU',
         'apollographql-client-name': 'web-customers',
-        'apollographql-client-version': '1.25.2',
+        'apollographql-client-version': '1.26.3',
         'Authorization': f'Bearer {auth_token}',
-        'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
+        'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.26.3,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=23a72fc6b9fd48769e62a090a50b9a90',
         'Content-Type': 'application/json',
         'Origin': f"{main_url}",
         'Priority': 'u=1, i',
@@ -126,15 +126,24 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
     endpoint = '/'
 
     payload_json = graphql_query_generator.generate_query()
-
+    query_sort_types = ['BY_RELEVANCE_DESC', 'BY_RELEVANCE_ASC',
+                        'BY_RATING_DESC', 'BY_RATING_ASC', 'BY_ORDERS_NUMBER_DESC', 'BY_ORDERS_NUMBER_ASC', 'BY_DATE_ADDED_ASC', 'BY_DATE_ADDED_DESC', 'BY_PRICE_ASC', 'BY_PRICE_DESC']
+    query_sort_ind = 0
     items_offset = 0
     data_list = []
+    prev_data = []
     request_attempts = 0
     done = False
 
+    def wait_with_backoff(request_attempts: int, backoff_factor: float):
+        logger.info(f"Attempt number {request_attempts}")
+        wait_time = backoff_factor * (2 ** request_attempts)
+        logger.info(f"Retrying in {wait_time} seconds...")
+        time.sleep(wait_time)
+
     while not done and request_attempts <= request_retries:
         graphql_query_generator.set_query_variables(
-            payload_json, category_id, items_offset, page_limit)
+            data=payload_json, category_id=category_id, offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
 
         conn = http.client.HTTPSConnection(host)
         try:
@@ -166,10 +175,7 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
                             error_429 = True
 
                     if error_429:
-                        logger.info(f"Attempt number {request_attempts}")
-                        wait_time = backoff_factor * (2 ** request_attempts)
-                        logger.info(f"Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
+                        wait_with_backoff(request_attempts, backoff_factor)
                         request_attempts += 1
                         continue
                     # raise ValueError(f"GraphQL query failed with errors: {
@@ -187,25 +193,36 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
                             len(data_list)} collected items in category {category_id}')
 
                 items_offset += min(page_limit, amount - len(data_list))
-                if (len(data_list) >= amount):
+                if (len(data_list) >= amount) or (data == prev_data):
                     done = True
 
+                # If reached the offset limit, try other types of query sorting to extract maximum data
+                if items_offset >= 10000:
+                    if query_sort_ind < len(query_sort_types) - 1:
+                        items_offset = 0
+                        query_sort_ind += 1
+                        logger.info(f"Reached the API offset limit of 10,000. Switching to sort type {
+                                    query_sort_types[query_sort_ind]}")
+                        # add 10000 to prevent stopping (the amount is now irrelevant)
+                        amount += 10000
+                    else:
+                        done = True
+
+                prev_data = data
                 request_attempts = 0
 
             elif response.status == 401:  # authorization failed
                 logger.info(
                     f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
                 auth_token = token_manager.get_token_instance()
+
                 headers['Authorization'] = f'Bearer {auth_token}'
                 request_attempts += 1
             elif response.status == 429:
                 # Server blocking due to multiple requests
                 logger.info(
                     "429: Blocked by a server due to too many requests.")
-                logger.info(f"Attempt number {request_attempts}")
-                wait_time = backoff_factor * (2 ** request_attempts)
-                logger.info(f"Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
+                wait_with_backoff(request_attempts, backoff_factor)
                 request_attempts += 1
                 continue
             else:
@@ -345,7 +362,8 @@ def fetch_data():
                     product_ids.extend(category_ids)
                 else:
                     failed_categories.append(
-                        {"id": f"category['id']", "productAmount": f"category['productAmount']"})
+                        {"id": category['id'], "productAmount": category['productAmount']})
+                break
 
             logger.info(f"Total {len(product_ids)} ids fetched.")
 
