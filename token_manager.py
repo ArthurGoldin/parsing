@@ -86,7 +86,7 @@ class TokenManager:
         for entry in logs:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "authorization")
-            if token is not None:
+            if token is not None and token != 'Promise]':
                 self.logger.info("Authorization token received. Proceeding...")
                 return token
 
@@ -142,7 +142,7 @@ class TokenManager:
                     self.logger.info(
                         "Network logs received by chromedriver. Processing...")
                     token = self.process_browser_logs_for_network_events(logs)
-                    if token is not None and token != 'Promise]':
+                    if token is not None:
                         if self.save_token:
                             subdomain = self.extract_subdomain(self.url)
 

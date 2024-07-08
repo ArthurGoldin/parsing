@@ -29,6 +29,20 @@ auth_token = None
 data_dir = "data"
 
 
+def save_csv(file: list, file_name: str, sub_dir: str = "", add_date_time: bool = True):
+    dir_path = f'{data_dir}/{sub_dir}'
+    if not os.path.exists(data_dir):
+        os.makedirs(dir_path)
+
+    if add_date_time:
+        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+    with open(f'{dir_path}/{file_name}.csv', 'w', newline='')as file:
+        writer = csv.writer(file)
+        writer.writerow(file)
+        logger.info(f"{file_name.split('_')[0]} saved to a .csv file")
+
+
 def decompress_http_response(response_data, encoding):
     if encoding == 'gzip':
         return zlib.decompress(response_data, zlib.MAX_WBITS | 16)
@@ -134,14 +148,17 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
     prev_data = []
     request_attempts = 0
     done = False
+    status = None
 
     def wait_with_backoff(request_attempts: int, backoff_factor: float):
-        logger.info(f"Attempt number {request_attempts}")
+        logger.info(f"Server rejected. Attempt number {request_attempts}")
         wait_time = backoff_factor * (2 ** request_attempts)
         logger.info(f"Retrying in {wait_time} seconds...")
         time.sleep(wait_time)
 
     while not done and request_attempts <= request_retries:
+        if request_attempts > 0:
+            wait_with_backoff(request_attempts, backoff_factor)
         graphql_query_generator.set_query_variables(
             data=payload_json, category_id=category_id, offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
 
@@ -150,6 +167,7 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
             conn.request("POST", endpoint, json.dumps(
                 payload_json), headers=headers)
             response = conn.getresponse()
+            status = response.status
             if response.status == 200:
                 response_data = response.read()
                 content_encoding = response.getheader('Content-Encoding')
@@ -175,7 +193,13 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
                             error_429 = True
 
                     if error_429:
-                        wait_with_backoff(request_attempts, backoff_factor)
+                        status = 429
+                        if request_attempts == 0:
+                            new_token = token_manager.get_token_instance()
+                            if new_token is not None:
+                                auth_token = new_token
+                                headers['Authorization'] = f'Bearer {
+                                    auth_token}'
                         request_attempts += 1
                         continue
                     # raise ValueError(f"GraphQL query failed with errors: {
@@ -222,7 +246,6 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
                 # Server blocking due to multiple requests
                 logger.info(
                     "429: Blocked by a server due to too many requests.")
-                wait_with_backoff(request_attempts, backoff_factor)
                 request_attempts += 1
                 continue
             else:
@@ -238,16 +261,16 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         logger.info(f"Finished retrieving category ids. Total collected {
             len(data_list)} out of {amount} in GraphQL in category {category_id}")
         data_list = list(set(data_list))
-        logger.info(f"Total unique ids: {
-                    len(data_list)} in category {category_id}")
+        logger.info(f"Total unique ids: {len(data_list)} in category {
+                    category_id}, return status: {status}")
         if save_category_ids:
-            with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(data_list)
+            save_csv(data_list, f'category_{
+                     category_id}_pr_ids', 'products_by_category')
     else:
-        logger.warning(f"No items collected from category {category_id}")
+        logger.warning(f"No items collected from category {
+                       category_id}, return status: {status}")
 
-    return data_list
+    return data_list, status
 
 
 def load_last_saved_root_categories(directory: str) -> dict:
@@ -335,10 +358,7 @@ def fetch_data():
         if leaf_categories:
             logger.info(f"Extracted {len(leaf_categories)
                                      } categories from root-categories.")
-            with open(f'{data_dir}/category_ids/leaf_categories_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='')as file:
-                writer = csv.writer(file)
-                writer.writerow(leaf_categories)
-                logger.info("Leaf category ids saved to a .csv file")
+            save_csv(leaf_categories, 'leaf_categories', 'category_ids')
         else:
             raise AttributeError("Leaf categories not found")
 
@@ -356,29 +376,26 @@ def fetch_data():
             product_ids = []
             failed_categories = []
             for category in leaf_categories:
-                category_ids = get_product_ids_by_category(
+                category_ids, status = get_product_ids_by_category(
                     category_id=category['id'], amount=category['productAmount'])
                 if len(category_ids) > 0:
                     product_ids.extend(category_ids)
-                else:
+                if status != 200:
                     failed_categories.append(
-                        {"id": category['id'], "productAmount": category['productAmount']})
-                break
+                        {"id": category['id'], "productAmount": category['productAmount'], "status": status})
 
             logger.info(f"Total {len(product_ids)} ids fetched.")
 
             product_ids = list(set(product_ids))
             logger.info(f"Total unique ids fetched: {len(product_ids)}")
-            with open(f'{data_dir}/product_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(product_ids)
-                logger.info("Product ids saved to a .csv file")
+            if product_ids:
+                save_csv(product_ids, 'product_ids', 'product_ids')
 
             if failed_categories:
-                with open(f'{data_dir}/failed_categories_ids_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv', 'w', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(failed_categories)
-                    logger.info("Product ids saved to a .csv file")
+                logger.info(f'Total number of failed categories: {
+                            len(failed_categories)}')
+                save_csv(failed_categories,
+                         'failed_categories_ids', 'failed_categories')
         else:
             raise FileNotFoundError("Failed to get authorization token.")
 
