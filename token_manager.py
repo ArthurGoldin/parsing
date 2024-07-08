@@ -1,5 +1,7 @@
 import undetected_chromedriver as uc
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 import json
 import pprint
@@ -118,11 +120,21 @@ class TokenManager:
                 if self.save_cookies:
                     self.save_cookies_with_path(driver, self.cookies_path)
 
+                # Wait until the page is fully loaded
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+
+                WebDriverWait(driver, 20).until(
+                    EC.title_contains("Uzum Market"))
+
                 # Wait for performance logs to be available
                 WebDriverWait(driver, 20).until(
                     lambda d: d.execute_script(
                         "return window.performance.getEntriesByType('resource').length > 0")
                 )
+
+                time.sleep(2)
 
                 logs = driver.get_log("performance")
 
