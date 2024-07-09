@@ -2,21 +2,31 @@ import http.client
 import json
 import zlib
 import brotli
+from datetime import datetime
 
+from token_manager import TokenManager
+
+token_manager = TokenManager(
+    url="https://uzum.uz/ru",
+    max_retries=4,
+    save_token=False,
+    save_cookies=False
+)
+auth_token = token_manager.get_token_instance()
 # Define the host and the endpoint
 host = 'api.uzum.uz'
-endpoint = '/api/v2/product/397154'
+endpoint = '/api/v2/product/868385'
 
 # Define the headers
 headers = {
     'authority': 'api.uzum.uz',
     'method': 'GET',
-    'path': '/api/v2/product/397154',
+    'path': '/api/v2/product/868385',
     'scheme': 'https',
     'Accept': 'application/json',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
     'Accept-Language': 'ru-RU',
-    'Authorization': 'Bearer eyJraWQiOiIwcE9oTDBBVXlWSXF1V0w1U29NZTdzcVNhS2FqYzYzV1N5THZYb0ZhWXRNIiwiYWxnIjoiRWREU0EiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJVenVtIElEIiwiaWF0IjoxNzE5MjUwMDI2LCJzdWIiOiI1ZjBlMGY4Ny00YTMyLTQ3ZTEtYTMwOC1jZWNlN2M3Y2Y5ZGUiLCJhdWQiOlsidXp1bV9hcHBzIiwibWFya2V0L3dlYiJdLCJldmVudHMiOnt9LCJleHAiOjE3MTkyNTA3NDZ9.YS88Qwpp_DHV9tAGjlD3-0q3T2gCJTOMIEVIK1cZCkdQG4pOm8MYm1bi8fq79V_NE3hFG7WYUeCWNJbHIBqdBw',
+    'Authorization': f'Bearer {auth_token}',
     'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.3,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=7045c04a13404cd1b3abb6633c60702f,sentry-sample_rate=0.001,sentry-transaction=product,sentry-sampled=false',
     'Content-Type': 'application/json',
     'Origin': 'https://uzum.uz',
@@ -81,7 +91,7 @@ try:
     product_id = endpoint.split('/')[-1]
 
     # Save the JSON data to a file
-    with open(f'response_{product_id}.json', 'w', encoding='utf-8') as json_file:
+    with open(f'response_{product_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json', 'w', encoding='utf-8') as json_file:
         json.dump(json_data, json_file, ensure_ascii=False, indent=4)
 
     # Close the connection
