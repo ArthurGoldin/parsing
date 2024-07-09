@@ -122,6 +122,7 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         'Authorization': f'Bearer {auth_token}',
         'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.26.3,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=23a72fc6b9fd48769e62a090a50b9a90',
         'Content-Type': 'application/json',
+        "Connection": "keep-alive",
         'Origin': f"{main_url}",
         'Priority': 'u=1, i',
         'Referer': f"{main_url}/",
@@ -156,13 +157,13 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         logger.info(f"Retrying in {wait_time} seconds...")
         time.sleep(wait_time)
 
+    conn = http.client.HTTPSConnection(host)
     while not done and request_attempts <= request_retries:
         if request_attempts > 0:
             wait_with_backoff(request_attempts, backoff_factor)
         graphql_query_generator.set_query_variables(
             data=payload_json, category_id=category_id, offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
 
-        conn = http.client.HTTPSConnection(host)
         try:
             conn.request("POST", endpoint, json.dumps(
                 payload_json), headers=headers)
@@ -483,6 +484,7 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Accept-Language': 'ru-RU',
             'Authorization': f'Bearer {auth_token}',
+            "Connection": "keep-alive",
             'Content-Type': 'application/json',
             'Origin': 'https://uzum.uz',
             'Priority': 'u=1, i',
@@ -511,12 +513,11 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
 
         logger.info(f'Total products to parse {
                     len(product_ids)}. Parsing...')
+        conn = http.client.HTTPSConnection(host)
         while ind < len(product_ids):
             if request_attempts > request_retries:
                 logger.error('Exceeded max number of retries!')
                 break
-
-            conn = http.client.HTTPSConnection(host)
             try:
                 product_id = product_ids[ind]
                 endpoint = endpoint_base + f'{product_id}'
