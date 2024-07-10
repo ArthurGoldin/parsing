@@ -1,5 +1,6 @@
 .venv
 chromedriver-win64
 data
-__pychache__s
+__pychache__
 old
+parsing.code-workspace
