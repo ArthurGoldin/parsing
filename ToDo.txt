@@ -5,3 +5,5 @@ V try to regenerate auth.token for status 429 (may be it will help)
 V add product scarping function
 
 - need to fix TokenManager initiation in main?
+
+- Update TokenManager to retrieve crucial headers

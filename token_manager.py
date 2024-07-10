@@ -86,7 +86,13 @@ class TokenManager:
         for entry in logs:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "authorization")
-            if token is not None and token != 'Promise]':
+            if token is not None and token != 'Promise]' and len(token) > 10:
+                self.logger.info("Authorization token received. Proceeding...")
+                return token
+        for entry in logs:
+            data = json.loads(entry["message"])["message"]
+            token = self.find_key(data, "access_token")
+            if token is not None and token != 'Promise]' and len(token) > 10:
                 self.logger.info("Authorization token received. Proceeding...")
                 return token
 
@@ -156,10 +162,10 @@ class TokenManager:
                             with open(out_name, "wt") as out:
                                 pprint.pprint(token, stream=out)
 
-                            # if token == 'Promise]':
-                            #     with open('logs.json', 'w', encoding='utf-8') as json_file:
-                            #         json.dump(logs, json_file,
-                            #                   ensure_ascii=False, indent=4)
+                            # # if token == 'Promise]':
+                            # with open('network_logs.json', 'w', encoding='utf-8') as json_file:
+                            #     json.dump(logs, json_file,
+                            #               ensure_ascii=False, indent=4)
                         break
                     else:
                         self.logger.info(

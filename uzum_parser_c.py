@@ -57,7 +57,7 @@ def decompress_http_response(response_data, encoding):
         return response_data
 
 
-def get_root_categories():
+def get_root_categories(request_retries: int = 8, backoff_factor: int = 1):
     host = root_categories_req_url.split('//')[1].split('/')[0]
     endpoint = "/api" + root_categories_req_url.split('api')[-1]
     headers = {
@@ -70,34 +70,50 @@ def get_root_categories():
     }
 
     root_categories = None
-    try:
-        conn = http.client.HTTPSConnection(host)
-        conn.request("GET", endpoint, headers=headers)
+    request_attempts = 0
 
-        response = conn.getresponse()
+    def wait_with_backoff(request_attempts: int, backoff_factor: float):
+        logger.info(f"Server rejected. Attempt number {request_attempts}")
+        wait_time = backoff_factor * (2 ** request_attempts)
+        logger.info(f"Retrying in {wait_time} seconds...")
+        time.sleep(wait_time)
 
-        if response.status == 200:
-            response_data = response.read()
-            content_encoding = response.getheader('Content-Encoding')
+    while request_attempts <= request_retries:
+        try:
+            conn = http.client.HTTPSConnection(host)
+            conn.request("GET", endpoint, headers=headers)
+            response = conn.getresponse()
 
-            if content_encoding:
-                response_data = decompress_http_response(
-                    response_data, content_encoding)
+            if response.status == 200:
+                response_data = response.read()
+                content_encoding = response.getheader('Content-Encoding')
 
-            decoded_data = response_data.decode('utf-8')
-            if not decoded_data:
-                raise ValueError("Empty response data")
-            root_categories = json.loads(decoded_data)
-            with open(f"{data_dir}/root_categories/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                json.dump(root_categories, file, ensure_ascii=False, indent=4)
-            logger.info(f'Collected root-categories from {main_url}')
-        else:
-            raise ValueError(
-                f"HTTP error occurred while fetching root-categories: Status code {response.status}")
-    except Exception as e:
-        logger.error(e)
-    finally:
-        conn.close()
+                if content_encoding:
+                    response_data = decompress_http_response(
+                        response_data, content_encoding)
+
+                decoded_data = response_data.decode('utf-8')
+                if not decoded_data:
+                    raise ValueError("Empty response data")
+                root_categories = json.loads(decoded_data)
+                with open(f"{data_dir}/root_categories/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
+                    json.dump(root_categories, file,
+                              ensure_ascii=False, indent=4)
+                logger.info(f'Collected root-categories from {main_url}')
+                break  # Exit the loop if the request is successful
+            else:
+                raise ValueError(
+                    f"HTTP error occurred while fetching root-categories: Status code {response.status}")
+
+        except Exception as e:
+            logger.error(e)
+            request_attempts += 1
+            if request_attempts > request_retries:
+                logger.error('Exceeded max number of retries!')
+                break
+            wait_with_backoff(request_attempts, backoff_factor)
+        finally:
+            conn.close()
 
     return root_categories
 
@@ -134,7 +150,8 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'x-context': 'null',
-        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
+        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7',
+        'Connection': 'keep-alive'
     }
     host = graphql_url.split('//')[1].split('/')[0]
     endpoint = '/'
@@ -156,13 +173,12 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         logger.info(f"Retrying in {wait_time} seconds...")
         time.sleep(wait_time)
 
+    conn = http.client.HTTPSConnection(host)
+
     while not done and request_attempts <= request_retries:
-        if request_attempts > 0:
-            wait_with_backoff(request_attempts, backoff_factor)
         graphql_query_generator.set_query_variables(
             data=payload_json, category_id=category_id, offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
 
-        conn = http.client.HTTPSConnection(host)
         try:
             conn.request("POST", endpoint, json.dumps(
                 payload_json), headers=headers)
@@ -194,16 +210,17 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
 
                     if error_429:
                         status = 429
+                        wait_with_backoff(request_attempts, backoff_factor)
                         if request_attempts == 0:
+                            conn.close()
                             new_token = token_manager.get_token_instance()
                             if new_token is not None:
                                 auth_token = new_token
                                 headers['Authorization'] = f'Bearer {
                                     auth_token}'
+                            conn = http.client.HTTPSConnection(host)
                         request_attempts += 1
                         continue
-                    # raise ValueError(f"GraphQL query failed with errors: {
-                    #                  error_messages}")
 
                 data = get_ids_from_json(json_data)
                 if len(data) > 0:
@@ -238,15 +255,19 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
             elif response.status == 401:  # authorization failed
                 logger.info(
                     f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
-                print(response.headers)
+                conn.close()
+                wait_with_backoff(request_attempts, backoff_factor)
                 auth_token = token_manager.get_token_instance()
                 logger.info(auth_token)
                 headers['Authorization'] = f'Bearer {auth_token}'
                 request_attempts += 1
+                conn = http.client.HTTPSConnection(host)
             elif response.status == 429:
                 # Server blocking due to multiple requests
                 logger.info(
                     "429: Blocked by a server due to too many requests.")
+
+                wait_with_backoff(request_attempts, backoff_factor)
                 request_attempts += 1
                 continue
             else:
@@ -255,12 +276,12 @@ def get_product_ids_by_category(category_id: int, amount: int, page_limit: int =
         except Exception as e:
             logger.error(f'Failed to receive data from a GraphQl query: {e}')
             break
-        finally:
-            conn.close()
+
+    conn.close()
 
     if len(data_list) != 0:
         logger.info(f"Finished retrieving category ids. Total collected {
-            len(data_list)} out of {amount} in GraphQL in category {category_id}")
+                    len(data_list)} out of {amount} in GraphQL in category {category_id}")
         data_list = list(set(data_list))
         logger.info(f"Total unique ids: {len(data_list)} in category {
                     category_id}, return status: {status}")
@@ -458,7 +479,6 @@ def parse_product(json_data: dict):
 
 def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: int = 1):
     # Define the host and the endpoint
-    product_api_url = "https://api.uzum.uz/api/v2/product/"
     host = product_api_url.split("//")[1].split('/')[0]
     endpoint_base = product_api_url.split('https://' + host)[1]
 
@@ -495,7 +515,8 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
             'Sec-Fetch-Site': 'same-site',
             'Sentry-Trace': '7045c04a13404cd1b3abb6633c60702f-b0db85c265fc14ff-0',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'X-Iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
+            'X-Iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7',
+            'Connection': 'keep-alive'
         }
 
         data_list = []
@@ -509,14 +530,16 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
             logger.info(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 
-        logger.info(f'Total products to parse {
-                    len(product_ids)}. Parsing...')
+        logger.info(f'Total products to parse {len(product_ids)}. Parsing...')
+
+        # Establish the connection outside the loop
+        conn = http.client.HTTPSConnection(host)
+
         while ind < len(product_ids):
             if request_attempts > request_retries:
                 logger.error('Exceeded max number of retries!')
                 break
 
-            conn = http.client.HTTPSConnection(host)
             try:
                 product_id = product_ids[ind]
                 endpoint = endpoint_base + f'{product_id}'
@@ -541,7 +564,8 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
                     # Check for errors in the response
                     if 'errors' in json_data:
                         error_messages = [
-                            error.get('message', 'Unknown error') for error in json_data['errors']]
+                            error.get('message', 'Unknown error') for error in json_data['errors']
+                        ]
                         error_429 = False
                         for error_message in error_messages:
                             logger.error(f'Product API Error: {error_message}')
@@ -550,13 +574,15 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
 
                         if error_429:
                             status = 429
+                            wait_with_backoff(request_attempts, backoff_factor)
                             if request_attempts == 0:
+                                conn.close()
                                 new_token = token_manager.get_token_instance()
                                 if new_token is not None:
                                     auth_token = new_token
                                     headers['Authorization'] = f'Bearer {
                                         auth_token}'
-                            wait_with_backoff(request_attempts, backoff_factor)
+                                conn = http.client.HTTPSConnection(host)
                             request_attempts += 1
                             continue
                     data, errors = parse_product(json_data)
@@ -571,16 +597,17 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
                     request_attempts = 0
                     ind += 1
                     if ind % 100 == 0:
-                        logger.info(
-                            f'Processed {ind + 1} products.')
+                        logger.info(f'Processed {ind} products.')
 
                 elif response.status == 401:  # authorization failed
                     logger.info(
                         f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
+                    conn.close()
                     wait_with_backoff(request_attempts, backoff_factor)
                     auth_token = token_manager.get_token_instance()
                     headers['Authorization'] = f'Bearer {auth_token}'
                     request_attempts += 1
+                    conn = http.client.HTTPSConnection(host)
                 elif response.status == 429:
                     # Server blocking due to multiple requests
                     logger.info(
@@ -590,13 +617,14 @@ def fetch_products(product_ids: list, request_retries: int = 8, backoff_factor: 
                     continue
                 else:
                     raise ValueError(f"Bad response status on a product API: {
-                        response.status}")
+                                     response.status}")
             except Exception as e:
-                logger.error(
-                    f'Failed to receive data from a product API: {e}')
+                logger.error(f'Failed to receive data from a product API: {e}')
                 break
-            finally:
-                conn.close()
+
+        # Close the connection once all requests are done
+        conn.close()
+
     else:
         raise FileNotFoundError("Failed to get authorization token.")
 
