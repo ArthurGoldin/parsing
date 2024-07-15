@@ -81,18 +81,18 @@ class TokenManager:
                     return result
         return None
 
-    def process_browser_logs_for_network_events(self, logs):
+    def process_browser_logs_to_fetch_authorization(self, logs):
         """Process network logs to find the authorization token."""
         for entry in logs:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "authorization")
-            if token is not None and token != 'Promise]' and len(token) > 10:
+            if token is not None and len(token) > 10:
                 self.logger.info("Authorization token received. Proceeding...")
                 return token
         for entry in logs:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "access_token")
-            if token is not None and token != 'Promise]' and len(token) > 10:
+            if token is not None and len(token) > 10:
                 self.logger.info("Authorization token received. Proceeding...")
                 return token
 
@@ -104,7 +104,7 @@ class TokenManager:
         end = url.find(".", start)
         return url[start:end] if end != -1 else None
 
-    def get_token_instance(self) -> str:
+    def get_token_instance(self, save_logs: bool = False) -> str:
         """
         Retrieve an authorization token by navigating to a URL and processing network logs.
 
@@ -140,14 +140,20 @@ class TokenManager:
                         "return window.performance.getEntriesByType('resource').length > 0")
                 )
 
-                time.sleep(2)
-
                 logs = driver.get_log("performance")
 
                 if logs:
+                    if save_logs:
+                        with open('data/network_logs.json', 'w', encoding='utf-8') as json_file:
+                            json.dump(logs, json_file,
+                                      ensure_ascii=False, indent=4)
+                            self.logger.info(
+                                "Network logs saved to: data/network_logs.json")
+
                     self.logger.info(
                         "Network logs received by chromedriver. Processing...")
-                    token = self.process_browser_logs_for_network_events(logs)
+                    token = self.process_browser_logs_to_fetch_authorization(
+                        logs)
                     if token is not None:
                         if self.save_token:
                             subdomain = self.extract_subdomain(self.url)
@@ -162,10 +168,6 @@ class TokenManager:
                             with open(out_name, "wt") as out:
                                 pprint.pprint(token, stream=out)
 
-                            # # if token == 'Promise]':
-                            # with open('network_logs.json', 'w', encoding='utf-8') as json_file:
-                            #     json.dump(logs, json_file,
-                            #               ensure_ascii=False, indent=4)
                         break
                     else:
                         self.logger.info(
