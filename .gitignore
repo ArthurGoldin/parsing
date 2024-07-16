@@ -1,6 +1,6 @@
+__pychache__/
+.vscode/
 .venv
-chromedriver-win64
 data
-__pychache__
 old
 parsing.code-workspace

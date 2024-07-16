@@ -2,12 +2,12 @@ import http.client
 import time
 import json
 from datetime import datetime
-import pandas as pd
 import logging
 import zlib
 import brotli
 import glob
 import os
+import sys
 from typing import List, Dict, Any
 from fake_useragent import UserAgent
 
@@ -226,4 +226,7 @@ def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_
 
 
 if __name__ == "__main__":
-    get_root_categories()
+    try:
+        get_root_categories()
+    except Exception as e:
+        logger.error(f"In {sys.argv[0]}->main: {e}")

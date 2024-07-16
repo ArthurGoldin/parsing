@@ -184,7 +184,8 @@ class TokenManager:
                 try:
                     driver.quit()
                 except Exception as e:
-                    self.logger.error(f"Error during driver quit: {e}")
+                    self.logger.error(
+                        f"Error during driver quit in get_token_instance: {e}")
             if token is None:
                 self.logger.info(f"Couldn't retrieve an authorization token after {
                                  self.max_retries + 1} attempts.")
