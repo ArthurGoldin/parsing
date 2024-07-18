@@ -7,3 +7,7 @@ V add product scarping function
 - need to fix TokenManager initiation in main?
 
 - Update TokenManager to retrieve crucial headers
+
+- Add product saving every n products
+V Add brand crawler 
+- Add saving to json

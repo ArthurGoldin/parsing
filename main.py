@@ -99,10 +99,12 @@ def fetch_data() -> None:
             raise AttributeError("Leaf categories not found")
 
         logger.info("Retrieving IDs...")
-        p_ids = product_ids.fetch_product_ids_by_categories(
-            leaf_categories)
-        if p_ids is None:
-            raise FileNotFoundError("Failed to retrieve product IDs.")
+        # p_ids = product_ids.fetch_product_ids_by_categories(
+        #     leaf_categories)
+        # if p_ids is None:
+        #     raise FileNotFoundError("Failed to retrieve product IDs.")
+        p_ids = product_ids.load_last_saved_csv(
+            f'{data_dir}/product_ids', 'product_ids')
 
         logger.info('Parsing products...')
         products, failed_products_ids = product_parser.fetch_products(p_ids)

@@ -22,6 +22,8 @@ data_dir = "data"
 
 token_manager = None
 
+brands_by_category = None
+
 
 def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
     """
@@ -76,6 +78,28 @@ def load_last_saved_csv(directory: str, name: str) -> List[int]:
         return None
 
 
+def load_last_saved_dict(directory=f"{data_dir}/brands"):
+    # Find all JSON files in the directory
+    list_of_files = glob.glob(os.path.join(directory, '*.json'))
+
+    if not list_of_files:
+        print(f"No JSON files found in directory {directory}.")
+        return None
+
+    # Get the latest file by modification time
+    latest_file = max(list_of_files, key=os.path.getmtime)
+
+    # Load the dictionary from the latest file
+    try:
+        with open(latest_file, 'r', encoding='utf-8') as file:
+            category_dict = json.load(file)
+        print(f"Loaded data from {latest_file}.")
+        return category_dict
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from the file {latest_file}.")
+        return None
+
+
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
     """
     Decompress the given HTTP response data based on its encoding.
@@ -110,15 +134,32 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru")
     Returns:
         Tuple[Dict[str, Any], Dict[str, str] | str]: The parsed product data and any error messages.
     """
+    def find_oldest_ancestor(category_data):
+        current_category = category_data['category']
+        while current_category['parent'] is not None:
+            current_category = current_category['parent']
+        return current_category['id']
+
+    def find_keywords_in_title(title, keywords):
+        if title and keywords:
+            found_keywords = [
+                keyword for keyword in keywords if keyword in title]
+            return found_keywords
+        else:
+            return ""
+
     try:
         payload = json_data.get('payload', {}).get('data', {})
 
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
 
+        brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(
+            payload)}']) if brands_by_category else ''
         result = {
             'id': payload.get('id', None),
             'title': payload.get('title', None),
+            'brand': ', '.join(brand),
             'category_id': payload.get('category', {}).get('id', None),
             'category_title': payload.get('category', {}).get('title', None),
             'rating': payload.get('rating', None),
@@ -126,6 +167,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru")
             'ordersAmount': payload.get('ordersAmount', None),
             'totalAvailableAmount': payload.get('totalAvailableAmount', None),
             'skuList': [{
+                'skuId': sku.get('id', None),
                 'availableAmount': sku.get('availableAmount', None),
                 'fullPrice': sku.get('fullPrice', None),
                 'purchasePrice': sku.get('purchasePrice', None)
@@ -154,7 +196,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru")
         return None, str(e)
 
 
-def fetch_products(p_ids: List[int], request_retries: int = 8, backoff_factor: int = 1, product_api_url: str = "https://api.uzum.uz/api/v2/product/", main_url: str = "https://uzum.uz/ru", save_data: bool = True, **kwargs) -> Tuple[List[Dict[str, Any]], List[int]]:
+def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: int = 1, product_api_url: str = "https://api.uzum.uz/api/v2/product/", main_url: str = "https://uzum.uz/ru", save_data: bool = True, **kwargs) -> Tuple[List[Dict[str, Any]], List[int]]:
     """
     Fetch product details for the given product IDs with retries and backoff on failure.
 
@@ -166,6 +208,9 @@ def fetch_products(p_ids: List[int], request_retries: int = 8, backoff_factor: i
     Returns:
         Tuple[List[Dict[str, Any]], List[int]]: A tuple containing the list of product details and the list of failed product IDs.
     """
+    global brands_by_category
+    brands_by_category = load_last_saved_dict()
+
     host = product_api_url.split("//")[1].split('/')[0]
     endpoint_base = product_api_url.split('https://' + host)[1]
 
@@ -255,18 +300,18 @@ def fetch_products(p_ids: List[int], request_retries: int = 8, backoff_factor: i
 
                         if error_429:
                             status = 429
+                            conn.close()
                             wait_with_backoff(
                                 request_attempts, backoff_factor)
                             if request_attempts == 0:
-                                conn.close()
                                 headers['User-Agent'] = ua.random
                                 new_token = token_manager.get_token_instance()
                                 if new_token is not None:
                                     auth_token = new_token
                                     headers['Authorization'] = f'Bearer {
                                         auth_token}'
-                                conn = http.client.HTTPSConnection(host)
                             request_attempts += 1
+                            conn = http.client.HTTPSConnection(host)
                             continue
 
                     data, errors = parse_product(json_data)
@@ -337,6 +382,7 @@ def are_integers(args):
 if __name__ == "__main__":
     arguments = sys.argv[1:]
     if are_integers(arguments):
+        brands_by_category = load_last_saved_dict()
         product_list = []
         for product in arguments:
             product_list.append(product)

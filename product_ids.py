@@ -121,7 +121,7 @@ def get_ids_from_json(json_data: Dict[str, Any]) -> List[int]:
     return product_ids
 
 
-def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: int = 100, request_retries: int = 8, backoff_factor: int = 1, main_url: str = "https://uzum.uz/ru", graphql_url: str = "https://graphql.uzum.uz/", save_category_ids: bool = False, **kwargs) -> Tuple[List[int], int]:
+def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: int = 100, request_retries: int = 10, backoff_factor: int = 1, main_url: str = "https://uzum.uz/ru", graphql_url: str = "https://graphql.uzum.uz/", save_category_ids: bool = False, **kwargs) -> Tuple[List[int], int]:
     """
     Fetch product IDs by category with pagination and retries.
 
@@ -229,17 +229,17 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
 
                         if error_429:
                             status = 429
+                            conn.close()
                             wait_with_backoff(request_attempts, backoff_factor)
                             if request_attempts == 0:
-                                conn.close()
                                 headers['User-Agent'] = ua.random
                                 new_token = token_manager.get_token_instance()
                                 if new_token is not None:
                                     auth_token = new_token
                                     headers['Authorization'] = f'Bearer {
                                         auth_token}'
-                                conn = http.client.HTTPSConnection(host)
                             request_attempts += 1
+                            conn = http.client.HTTPSConnection(host)
                             continue
 
                     data = get_ids_from_json(json_data)
@@ -367,9 +367,9 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
             if failed_categories:
                 save_csv(failed_categories, 'failed_categories_ids',
                          'failed_categories')
-                with open(f"{data_dir}/failed_categories_ids/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                    json.dump(failed_categories, file,
-                              ensure_ascii=False, indent=4)
+                # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
+                #     json.dump(failed_categories, file,
+                #               ensure_ascii=False, indent=4)
 
         if not p_ids and load_most_recent_if_failed:
             logger.warning(f"Could not fetch product IDs from {
