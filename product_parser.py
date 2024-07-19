@@ -130,7 +130,7 @@ def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
         return response_data
 
 
-def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru") -> Tuple[Dict[str, Any], Dict[str, str] | str]:
+def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru") -> Tuple[Dict[str, Any], Dict[str, str] | str]:
     """
     Parse product information from the given JSON data.
 
