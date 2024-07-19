@@ -11,6 +11,7 @@ import brotli
 from fake_useragent import UserAgent
 from typing import List, Tuple, Dict, Any
 import sys
+import re
 
 from token_manager import TokenManager
 
@@ -25,9 +26,9 @@ token_manager = None
 brands_by_category = None
 
 
-def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
+def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False) -> None:
     """
-    Save the given data to a CSV file.
+    Save the given data to a CSV/JSON file.
 
     Args:
         file (List[Any]): Data to be saved.
@@ -35,18 +36,23 @@ def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: 
         sub_dir (str, optional): Sub-directory within the data directory.
         add_date_time (bool, optional): Whether to append the current datetime to the file name.
     """
-    dir_path = f"{data_dir}/{sub_dir}"
+    dir_path = f"{
+        data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y")}"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     orig_file_name = file_name
     if add_date_time:
         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
 
-    with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-        writer = csv.writer(write_file)
-        writer.writerow(file)
-        logger.info(f"{orig_file_name} saved to a .csv file in {
-                    data_dir}/{sub_dir}")
+    if file_type == "CSV" or file_type == "csv" or file_type == "":
+        with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+            writer = csv.writer(write_file)
+            writer.writerow(file)
+            logger.info(f"{orig_file_name}.csv saved to {dir_path}")
+    if file_type == "JSON" or file_type == "json" or file_type == "":
+        with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
+            json.dump(file, write_file, ensure_ascii=False, indent=4)
+            logger.info(f"{orig_file_name}.json saved to {dir_path}")
 
 
 def load_last_saved_csv(directory: str, name: str) -> List[int]:
@@ -83,7 +89,7 @@ def load_last_saved_dict(directory=f"{data_dir}/brands"):
     list_of_files = glob.glob(os.path.join(directory, '*.json'))
 
     if not list_of_files:
-        print(f"No JSON files found in directory {directory}.")
+        logger.warning(f"No JSON files found in directory {directory}.")
         return None
 
     # Get the latest file by modification time
@@ -93,10 +99,10 @@ def load_last_saved_dict(directory=f"{data_dir}/brands"):
     try:
         with open(latest_file, 'r', encoding='utf-8') as file:
             category_dict = json.load(file)
-        print(f"Loaded data from {latest_file}.")
+        logger.info(f"Loaded data from {latest_file}.")
         return category_dict
     except json.JSONDecodeError:
-        print(f"Error decoding JSON from the file {latest_file}.")
+        logger.error(f"Error decoding JSON from the file {latest_file}.")
         return None
 
 
@@ -141,19 +147,19 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru")
         return current_category['id']
 
     def find_keywords_in_title(title, keywords):
-        if title and keywords:
-            found_keywords = [
-                keyword for keyword in keywords if keyword in title]
-            return found_keywords
-        else:
-            return ""
+        matches = []
+        for keyword in keywords:
+            # Use regex to find full word match
+            if re.search(r'\b' + re.escape(keyword) + r'\b', title):
+                matches.append(keyword)
+        return matches
 
     try:
         payload = json_data.get('payload', {}).get('data', {})
+        seo = json_data.get('payload', {}).get('seo', {})
 
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
-
         brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(
             payload)}']) if brands_by_category else ''
         result = {
@@ -166,18 +172,30 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https.uzum.uz/ru")
             'reviewsAmount': payload.get('reviewsAmount', None),
             'ordersAmount': payload.get('ordersAmount', None),
             'totalAvailableAmount': payload.get('totalAvailableAmount', None),
+            'url': f'{main_url}/product/{payload.get("id", None)}',
+            'photo': payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None),
             'skuList': [{
-                'skuId': sku.get('id', None),
+                'characteristics': [{
+                    'id': char.get('id', None),
+                    'title': char.get('title', None),
+                    'values': [{
+                        'id': val.get('id', None),
+                        'title': val.get('title', None),
+                        'value': val.get('value', None)
+                    } for val in char.get('values', [])]
+                } for char in seo.get('characteristics', [])],
+                'id': sku.get('id', None),
                 'availableAmount': sku.get('availableAmount', None),
                 'fullPrice': sku.get('fullPrice', None),
                 'purchasePrice': sku.get('purchasePrice', None)
             } for sku in payload.get('skuList', [])],
-            'seller_id': payload.get('seller', {}).get('id', None),
-            'seller_title': payload.get('seller', {}).get('title', None),
-            'seller_rating': payload.get('seller', {}).get('rating', None),
-            'seller_reviews': payload.get('seller', {}).get('reviews', None),
-            'seller_orders': payload.get('seller', {}).get('orders', None),
-            'url': f'{main_url}/product/{payload.get("id", None)}',
+            'seller': [{
+                'id': payload.get('seller', {}).get('id', None),
+                'title': payload.get('seller', {}).get('title', None),
+                'rating': payload.get('seller', {}).get('rating', None),
+                'reviews': payload.get('seller', {}).get('reviews', None),
+                'orders': payload.get('seller', {}).get('orders', None),
+            }],
         }
 
         # Check for null values and add error messages if any
@@ -359,13 +377,18 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
     if data_list:
         logger.info(f'Finished parsing {len(data_list)} products.')
         if save_data:
-            save_csv(data_list, 'products', 'products')
+            data_to_save = {
+                'platform': 'UZUM',
+                'data': data_list
+            }
+            save_to_file(data_to_save, 'products', 'products')
     else:
         logger.warning('Zero products parsed!')
     if failed_product_ids:
         logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
         if save_data:
-            save_csv(failed_product_ids, 'failed_product_ids', 'products')
+            save_to_file(failed_product_ids, 'failed_product_ids',
+                         'products', file_type="CSV")
 
     return data_list, failed_product_ids
 

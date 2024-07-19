@@ -10,4 +10,4 @@ V add product scarping function
 
 - Add product saving every n products
 V Add brand crawler 
-- Add saving to json
+V Add saving to json

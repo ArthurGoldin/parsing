@@ -1,6 +1,5 @@
 import json
 import undetected_chromedriver as uc
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -29,11 +28,13 @@ def save_dict_to_file(category_dict, directory=f"{data_dir}/brands", filename="b
     # Save the dictionary to a file as JSON
     with open(f"{directory}/{filename}_{datetime.now().strftime('%Y%m%d_%H%M')}.json", 'w', encoding='utf-8') as file:
         json.dump(category_dict, file, ensure_ascii=False, indent=4)
+        logger.info(f"Saved {filename} to {directory}")
 
 
 def save_html_to_file(html, filename):
-    with open(filename, 'w', encoding='utf-8') as file:
+    with open(f"data/{filename}", 'w', encoding='utf-8') as file:
         file.write(html)
+        logger.info(f"Saved {filename} to data dir.")
 
 
 def load_last_saved_dict(directory=f"{data_dir}/brands"):
@@ -41,7 +42,7 @@ def load_last_saved_dict(directory=f"{data_dir}/brands"):
     list_of_files = glob.glob(os.path.join(directory, '*.json'))
 
     if not list_of_files:
-        print(f"No JSON files found in directory {directory}.")
+        logger.warning(f"No JSON files found in directory {directory}.")
         return None
 
     # Get the latest file by modification time
@@ -51,10 +52,10 @@ def load_last_saved_dict(directory=f"{data_dir}/brands"):
     try:
         with open(latest_file, 'r', encoding='utf-8') as file:
             category_dict = json.load(file)
-        print(f"Loaded data from {latest_file}.")
+        logger.info(f"Loaded data from {latest_file}.")
         return category_dict
     except json.JSONDecodeError:
-        print(f"Error decoding JSON from the file {latest_file}.")
+        logger.error(f"Error decoding JSON from the file {latest_file}.")
         return None
 
 
@@ -67,27 +68,40 @@ def fetch_html(url, max_retries=5):
     html = None
     driver = None
     attempt_count = 0
-    try:
+
+    while attempt_count < max_retries:
         driver = uc.Chrome(options=options)
-        while attempt_count < max_retries:
+        try:
             driver.get(url)
 
             WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
+                EC.presence_of_element_located(
+                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[1]"))
+            )
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[2]/ul"))
             )
 
-            # Check if the button exists and click it if found
-            try:
-                show_more_button = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, "(//span[@data-test-id='button__show-more'])[2]"))
-                )
-                show_more_button.click()
-                time.sleep(5)  # Wait for the page to load additional content
-            except:
-                logger.info("Show more button not found or not clickable")
+            time.sleep(1)
+            while True:
+                try:
+                    buttons = driver.find_elements(
+                        By.XPATH, "//span[@data-test-id='button__show-more']")
+                    if not buttons:
+                        break
+                    for button in buttons:
+                        driver.execute_script("arguments[0].click();", button)
+                        time.sleep(1)  # Adjust sleep time if necessary
 
-                # Fetch the updated page source
+                    # Wait for the new elements to load
+                    time.sleep(2)
+                    break
+                except Exception as e:
+                    logger.error(f"Error clicking 'show more' buttons: {e}")
+                    break
+
+            # Fetch the updated page source
             html = driver.page_source
 
             if html:
@@ -96,14 +110,14 @@ def fetch_html(url, max_retries=5):
                 logger.warning(f"Could not fetch html content for category id {
                                url.split('/')[-1]} in attempt number {attempt_count}. Retrying...")
                 attempt_count += 1
-    except Exception as e:
-        logger.error(f'Error fetching HTML: {e}')
-    finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception as e:
-                logger.error(f'Error during driver quit: {e}')
+        except Exception as e:
+            logger.error(f'Error fetching HTML: {e}')
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception as e:
+                    logger.error(f'Error during driver quit: {e}')
 
     return html
 
@@ -123,7 +137,7 @@ def get_brand_labels(html):
             break
 
     if not brand_section:
-        logger.error("Brand section not found")
+        logger.warning("Brand section not found")
         return []
 
     # Get the parent div that contains the label section
@@ -151,7 +165,7 @@ def get_brands_by_category(categories, url="https://uzum.uz/ru/category/"):
                 logger.info(f"Category {category} has {len(labels)} brands")
             brands_by_category[category] = labels
         else:
-            logger.error(
+            logger.warning(
                 f'Failed to fetch HTML content for category {category}')
 
     return brands_by_category
@@ -174,7 +188,8 @@ def get_all_main_categories():
 main_categories = get_all_main_categories()
 logger.info(f"Beginning brands crawling for total {
             len(main_categories)} categories.")
-brands_by_category = get_brands_by_category(main_categories)
+logger.info(main_categories)
+brands_by_category = get_brands_by_category([10005])
 
 if brands_by_category:
     save_dict_to_file(brands_by_category)
