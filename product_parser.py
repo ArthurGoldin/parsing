@@ -415,18 +415,18 @@ if __name__ == "__main__":
     parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
                         help='an integer for the product ID to process')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
-                        const='product_ids', help='Load the last saved product IDS, specify a file name to load from data/product_ids')
+                        const='product_ids', help='Load the last saved product IDS, specify a file name to load from data/product_ids.')
 
     args = parser.parse_args()
     product_list = []
     if args.load:
         file_name = args.load
         if file_name:
-            logger.info(f"Loading IDs data from file: {file_name}")
+            logger.info(f"Loading IDs data from file: {file_name}.")
             product_list = load_last_saved_csv(file_name=file_name)
         else:
             logger.info(
-                f"Loading the last saved IDs from: {data_dir}/product_ids")
+                f"Loading the last saved IDs from: {data_dir}/product_ids.")
             product_list = load_last_saved_csv()
     elif args.product_ids and are_integers(args.product_ids):
         brands_by_category = load_last_saved_dict()
