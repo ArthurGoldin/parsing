@@ -433,7 +433,7 @@ if __name__ == "__main__":
         product_list = args.product_ids
     else:
         logger.info(f"Loading last saved product IDs in {
-                    data_dir}/product_ids")
+                    data_dir}/product_ids.")
         product_list = load_last_saved_csv()
 
     if product_list:
