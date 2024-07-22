@@ -12,6 +12,7 @@ from fake_useragent import UserAgent
 from typing import List, Tuple, Dict, Any
 import sys
 import re
+import argparse
 
 from token_manager import TokenManager
 
@@ -47,7 +48,7 @@ def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: 
     if file_type == "CSV" or file_type == "csv" or file_type == "":
         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
             writer = csv.writer(write_file)
-            writer.writerow(file)
+            writer.writerow(file['data'])
             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
     if file_type == "JSON" or file_type == "json" or file_type == "":
         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
@@ -55,7 +56,7 @@ def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: 
             logger.info(f"{orig_file_name}.json saved to {dir_path}")
 
 
-def load_last_saved_csv(directory: str, name: str) -> List[int]:
+def load_last_saved_csv(directory: str = f'{data_dir}/product_ids', file_name: str = "product_ids") -> List[int]:
     """
     Load the last saved CSV file from the specified directory.
 
@@ -67,12 +68,16 @@ def load_last_saved_csv(directory: str, name: str) -> List[int]:
         List[int]: List of integers read from the CSV file.
     """
     try:
-        list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
-        if not list_of_files:
-            raise FileNotFoundError(
-                "No csv files found in the directory/category.")
+        if file_name.endswith('csv'):
+            latest_file = file_name
+        else:
+            list_of_files = glob.glob(os.path.join(
+                directory, f'{file_name}_*.csv'))
+            if not list_of_files:
+                raise FileNotFoundError(
+                    "No csv files found in the directory/category.")
 
-        latest_file = max(list_of_files, key=os.path.getctime)
+            latest_file = max(list_of_files, key=os.path.getctime)
 
         with open(latest_file, newline='') as csvfile:
             reader = csv.reader(csvfile)
@@ -160,8 +165,11 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
 
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
-        brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(
-            payload)}']) if brands_by_category else ''
+        if payload.get('category', {}).get('title', None) == "Смартфоны Apple iPhone(iOS)":
+            brand = ["Apple"]
+        else:
+            brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(
+                payload)}']) if brands_by_category else ''
         result = {
             'id': payload.get('id', None),
             'title': payload.get('title', None),
@@ -403,16 +411,38 @@ def are_integers(args):
 
 
 if __name__ == "__main__":
-    arguments = sys.argv[1:]
-    if are_integers(arguments):
+    parser = argparse.ArgumentParser(description='Process product data.')
+    parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
+                        help='an integer for the product ID to process')
+    parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
+                        const='product_ids', help='Load the last saved product IDS, specify a file name to load from data/product_ids')
+
+    args = parser.parse_args()
+    product_list = []
+    if args.load:
+        file_name = args.load
+        if file_name:
+            logger.info(f"Loading IDs data from file: {file_name}")
+            product_list = load_last_saved_csv(file_name=file_name)
+        else:
+            logger.info(
+                f"Loading the last saved IDs from: {data_dir}/product_ids")
+            product_list = load_last_saved_csv()
+    elif args.product_ids and are_integers(args.product_ids):
         brands_by_category = load_last_saved_dict()
-        product_list = []
-        for product in arguments:
-            product_list.append(product)
-        logger.info("Starting parse products from the input...")
+        product_list = args.product_ids
+    else:
+        logger.info(f"Loading last saved product IDs in {
+                    data_dir}/product_ids")
+        product_list = load_last_saved_csv()
+
+    if product_list:
+        brands_by_category = load_last_saved_dict()
+        if not brands_by_category:
+            logger.warning("Could not load main categories brands.")
+
+        logger.info("Starting to parse products from the input...")
         try:
             fetch_products(product_list)
         except Exception as e:
             logger.error(f"In {sys.argv[0]}->main: {e}")
-    else:
-        logger.error("Wrong input arguments.")
