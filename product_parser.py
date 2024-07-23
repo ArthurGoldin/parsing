@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
-data_dir = "data"
+data_dir: str = "data"
 
 token_manager = None
 
@@ -68,18 +68,20 @@ def load_last_saved_csv(directory: str = f'{data_dir}/product_ids', file_name: s
         List[int]: List of integers read from the CSV file.
     """
     try:
-        if file_name.endswith('csv'):
-            latest_file = file_name
+        if file_name.endswith('.csv'):
+            logger.info(f'Loading {file_name} from {directory}')
+            latest_file_path = f"{directory}/{file_name}"
         else:
             list_of_files = glob.glob(os.path.join(
                 directory, f'{file_name}_*.csv'))
             if not list_of_files:
                 raise FileNotFoundError(
                     "No csv files found in the directory/category.")
+            latest_file_path = max(list_of_files, key=os.path.getctime)
 
-            latest_file = max(list_of_files, key=os.path.getctime)
+            logger.info(f'Loading {latest_file_path}')
 
-        with open(latest_file, newline='') as csvfile:
+        with open(latest_file_path, newline='') as csvfile:
             reader = csv.reader(csvfile)
             for row in reader:
                 int_list = [int(item) for item in row]

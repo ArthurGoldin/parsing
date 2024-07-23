@@ -16,15 +16,15 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
-main_url = "https://uzum.uz/ru"
-graphql_url = "https://graphql.uzum.uz/"
-root_categories_req_url = "https://api.uzum.uz/api/main/root-categories?eco=false"
-product_api_url = "https://api.uzum.uz/api/v2/product/"
+main_url: str = "https://uzum.uz/ru"
+graphql_url: str = "https://graphql.uzum.uz/"
+root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false"
+product_api_url: str = "https://api.uzum.uz/api/v2/product/"
 
 token_manager = None
-auth_token = None
+auth_token: str = None
 
-data_dir = "data"
+data_dir: str = "data"
 
 
 def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
