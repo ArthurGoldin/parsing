@@ -163,22 +163,39 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
                 matches.append(keyword)
         return matches
 
+    def get_hierarchical_parents(category) -> Dict[str, Any]:
+        if not category or 'parent' not in category or category['parent'] is None:
+            return None
+        parent = category['parent']
+        return {
+            'id': parent.get('id', None),
+            'title': parent.get('title', None),
+            'productAmount': parent.get('productAmount', None),
+            'parent': get_hierarchical_parents(parent)
+        }
+
     try:
         payload = json_data.get('payload', {}).get('data', {})
         characteristic_data = payload.get('characteristics', [])
+
+        hierarchical_parents = get_hierarchical_parents(payload.get('category', {}))
+
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
         if payload.get('category', {}).get('title', None) == "Смартфоны Apple iPhone(iOS)":
             brand = ["Apple"]
         else:
-            brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(
-                payload)}']) if brands_by_category else ''
+            brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(payload)}']) if brands_by_category else ''
         result = {
             'id': payload.get('id', None),
             'title': payload.get('title', None),
             'brand': ', '.join(brand),
-            'category_id': payload.get('category', {}).get('id', None),
-            'category_title': payload.get('category', {}).get('title', None),
+            'category': {
+                'id': payload.get('category', {}).get('id', None),
+                'title': payload.get('category', {}).get('title', None),
+                'productAmount': payload.get('category', {}).get('productAmount', None),
+                'parent': hierarchical_parents
+            },
             'rating': payload.get('rating', None),
             'reviewsAmount': payload.get('reviewsAmount', None),
             'ordersAmount': payload.get('ordersAmount', None),
@@ -394,8 +411,7 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
     if failed_product_ids:
         logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
         if save_data:
-            save_to_file(failed_product_ids, 'failed_product_ids',
-                         'products', file_type="CSV")
+            save_to_file(failed_product_ids, 'failed_product_ids', 'products', file_type="CSV")
 
     return data_list, failed_product_ids
 
