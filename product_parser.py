@@ -14,6 +14,8 @@ import sys
 import re
 import argparse
 
+from numpy import character
+
 from token_manager import TokenManager
 
 logging.basicConfig(level=logging.INFO,
@@ -163,8 +165,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
 
     try:
         payload = json_data.get('payload', {}).get('data', {})
-        seo = json_data.get('payload', {}).get('seo', {})
-
+        characteristic_data = payload.get('characteristics', [])
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
         if payload.get('category', {}).get('title', None) == "Смартфоны Apple iPhone(iOS)":
@@ -186,14 +187,10 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
             'photo': payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None),
             'skuList': [{
                 'characteristics': [{
-                    'id': char.get('id', None),
-                    'title': char.get('title', None),
-                    'values': [{
-                        'id': val.get('id', None),
-                        'title': val.get('title', None),
-                        'value': val.get('value', None)
-                    } for val in char.get('values', [])]
-                } for char in seo.get('characteristics', [])],
+                    'id': characteristic_data[char.get('charIndex', None)]['id'],
+                    'title': characteristic_data[char.get('charIndex', None)]['title'],
+                    'values': characteristic_data[char.get('charIndex', None)]['values'][char.get('valueIndex', None)]
+                } for char in sku.get('characteristics', [])],
                 'id': sku.get('id', None),
                 'availableAmount': sku.get('availableAmount', None),
                 'fullPrice': sku.get('fullPrice', None),

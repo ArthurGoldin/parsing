@@ -78,7 +78,7 @@ def load_last_saved_csv(directory: str, name: str) -> List[int]:
         return int_list
     except Exception as e:
         logging.error(f'Failed to load the last saved csv file: {e}')
-        return None
+        return []
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -195,7 +195,7 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
 
         while not done and request_attempts <= request_retries:
             graphql_query_generator.set_query_variables(
-                data=payload_json, category_id=category_id, offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
+                data=payload_json, category_id=f'{category_id}', offset=items_offset, limit=page_limit, sort=query_sort_types[query_sort_ind])
 
             try:
                 conn.request("POST", endpoint, json.dumps(
@@ -312,11 +312,9 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
         logger.info(f"Total unique ids: {len(data_list)} in category {
                     category_id}, return status: {status}")
         if save_category_ids:
-            save_csv(data_list, f'category_{
-                     category_id}_pr_ids', 'products_by_category')
+            save_csv(data_list, f'category_{category_id}_pr_ids', 'products_by_category')
     else:
-        logger.warning(f"No items collected from category {
-                       category_id}, return status: {status}")
+        logger.warning(f"No items collected from category {category_id}, return status: {status}")
 
     return data_list, status
 
@@ -365,18 +363,15 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
                 save_csv(p_ids, 'product_ids', 'product_ids')
 
             if failed_categories:
-                save_csv(failed_categories, 'failed_categories_ids',
-                         'failed_categories')
+                save_csv(failed_categories, 'failed_categories_ids', 'failed_categories')
                 # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
                 #     json.dump(failed_categories, file,
                 #               ensure_ascii=False, indent=4)
 
         if not p_ids and load_most_recent_if_failed:
-            logger.warning(f"Could not fetch product IDs from {
-                           main_url}, loading most recent saved ids.")
+            logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")
             p_ids = load_last_saved_csv(
                 f'{data_dir}/product_ids', 'product_ids')
-
         return p_ids
     else:
         raise FileNotFoundError("Failed to get authorization token.")

@@ -144,8 +144,7 @@ class TokenManager:
                 if logs:
                     if save_logs:
                         with open('data/network_logs.json', 'w', encoding='utf-8') as json_file:
-                            json.dump(logs, json_file,
-                                      ensure_ascii=False, indent=4)
+                            json.dump(logs, json_file, ensure_ascii=False, indent=4)
                             self.logger.info(
                                 "Network logs saved to: data/network_logs.json")
 
@@ -186,8 +185,7 @@ class TokenManager:
                     self.logger.error(
                         f"Error during driver quit in get_token_instance: {e}")
             if token is None:
-                self.logger.info(f"Couldn't retrieve an authorization token after {
-                                 self.max_retries + 1} attempts.")
+                self.logger.info(f"Couldn't retrieve an authorization token after {self.max_retries + 1} attempts.")
         return token
 
 

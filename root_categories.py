@@ -87,8 +87,7 @@ def find_leaf_categories(category_tree: Dict[str, Any]) -> List[Dict[str, Any]]:
         logger.error(f"Failed to find leaf categories: {e}")
 
     if len(leaf_categories) > 0:
-        logger.info(f"Extracted {len(leaf_categories)
-                                 } categories from root-categories.")
+        logger.info(f"Extracted {len(leaf_categories)} categories from root-categories.")
     return leaf_categories
 
 
@@ -196,8 +195,7 @@ def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_
                     raise ValueError("Empty response data")
                 root_categories = json.loads(decoded_data)
                 with open(f"{data_dir}/root_categories/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                    json.dump(root_categories, file,
-                              ensure_ascii=False, indent=4)
+                    json.dump(root_categories, file, ensure_ascii=False, indent=4)
                 logger.info(f'Collected root-categories from {main_url}')
                 break  # Exit the loop if the request is successful
             else:

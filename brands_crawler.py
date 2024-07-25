@@ -112,14 +112,12 @@ def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
 
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located(
-                    (By.XPATH,
-                     "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[1]")
+                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[1]")
                 )
             )
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located(
-                    (By.XPATH,
-                     "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[2]/ul")
+                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[2]/ul")
                 )
             )
 
@@ -145,8 +143,7 @@ def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
             if html:
                 break
             else:
-                logger.warning(f"Could not fetch HTML content for category ID {
-                               url.split('/')[-1]} in attempt number {attempt_count}. Retrying...")
+                logger.warning(f"Could not fetch HTML content for category ID {url.split('/')[-1]} in attempt number {attempt_count}. Retrying...")
                 attempt_count += 1
         except Exception as e:
             logger.error(f'Error fetching HTML: {e}')
@@ -172,8 +169,7 @@ def get_brand_labels(html: str) -> List[str]:
     """
     soup = BeautifulSoup(html, 'html.parser')
 
-    span_elements = soup.find_all('span', {
-                                  'class': 'slightly transparent hug title-text', 'data-test-id': 'text__filter-name'})
+    span_elements = soup.find_all('span', {'class': 'slightly transparent hug title-text', 'data-test-id': 'text__filter-name'})
 
     brand_section = None
     for span in span_elements:
@@ -236,8 +232,7 @@ def get_all_main_categories() -> Optional[List[int]]:
         rc = root_categories.get_root_categories(
             load_most_recent_if_failed=False)
     if rc:
-        main_categories = [main_category['id']
-                           for main_category in rc['payload']]
+        main_categories = [main_category['id'] for main_category in rc['payload']]
         return main_categories
     else:
         return None
