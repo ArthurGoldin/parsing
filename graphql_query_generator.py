@@ -1,9 +1,9 @@
 import json
 import logging
+import logging.config
 
 # Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
 

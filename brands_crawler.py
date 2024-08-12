@@ -1,88 +1,26 @@
-import json
 import undetected_chromedriver as uc
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-import os
+from selenium.common.exceptions import TimeoutException
 import logging
+import logging.config
 import time
 from bs4 import BeautifulSoup
 import root_categories
-from datetime import datetime
-import glob
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Optional
+import configparser
+from save_and_load_data import save_to_file
 
 # Configure logging
-logging_level = os.getenv('LOGGING_LEVEL', 'INFO').upper()
-logging.basicConfig(level=logging_level,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
-data_dir: str = "data"
+config = configparser.ConfigParser()
+config.read('configs/app.conf')
 
-
-def save_dict_to_file(category_dict: Dict[str, List[str]], directory: str = f"{data_dir}/brands", filename: str = "brands_by_category") -> None:
-    """
-    Save the dictionary to a file as JSON.
-
-    Args:
-        category_dict (Dict[str, List[str]]): The dictionary containing category data.
-        directory (str): The directory where the file should be saved.
-        filename (str): The base name of the file.
-
-    Returns:
-        None
-    """
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-    with open(f"{directory}/{filename}_{datetime.now().strftime('%Y%m%d_%H%M')}.json", 'w', encoding='utf-8') as file:
-        json.dump(category_dict, file, ensure_ascii=False, indent=4)
-        logger.info(f"Saved {filename} to {directory}")
-
-
-def save_html_to_file(html: str, filename: str) -> None:
-    """
-    Save the HTML content to a file.
-
-    Args:
-        html (str): The HTML content to be saved.
-        filename (str): The name of the file.
-
-    Returns:
-        None
-    """
-    with open(f"data/{filename}", 'w', encoding='utf-8') as file:
-        file.write(html)
-        logger.info(f"Saved {filename} to data dir.")
-
-
-def load_last_saved_dict(directory: str = f"{data_dir}/brands") -> Optional[Dict[str, List[str]]]:
-    """
-    Load the most recently saved dictionary from the specified directory.
-
-    Args:
-        directory (str): The directory to look for JSON files.
-
-    Returns:
-        Optional[Dict[str, List[str]]]: The loaded dictionary, or None if loading fails.
-    """
-    list_of_files = glob.glob(os.path.join(directory, '*.json'))
-
-    if not list_of_files:
-        logger.warning(f"No JSON files found in directory {directory}.")
-        return None
-
-    latest_file = max(list_of_files, key=os.path.getmtime)
-
-    try:
-        with open(latest_file, 'r', encoding='utf-8') as file:
-            category_dict = json.load(file)
-        logger.info(f"Loaded data from {latest_file}.")
-        return category_dict
-    except json.JSONDecodeError:
-        logger.error(f"Error decoding JSON from the file {latest_file}.")
-        return None
+data_dir = config.get('storage', 'data_directory')
+brands_dir = config.get('storage', 'brands_sub_dir')
 
 
 def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
@@ -110,16 +48,14 @@ def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
         try:
             driver.get(url)
 
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[1]")
+            try:
+                WebDriverWait(driver, 30).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//div[@id='filters']//ul")
+                    )
                 )
-            )
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "/html/body/div/main/div/div[2]/div[2]/div[2]/aside/div/div/div/div[2]/ul")
-                )
-            )
+            except TimeoutException:
+                logger.warning("XPath not found within the time limit. Proceeding to click buttons.")
 
             time.sleep(1)
             while True:
@@ -172,9 +108,9 @@ def get_brand_labels(html: str) -> List[str]:
     span_elements = soup.find_all('span', {'class': 'slightly transparent hug title-text', 'data-test-id': 'text__filter-name'})
 
     brand_section = None
-    for span in span_elements:
-        if span.get_text(strip=True) == 'Бренд':
-            brand_section = span
+    for element in span_elements:
+        if element.get_text(strip=True) == 'Бренд':
+            brand_section = element
             break
 
     if not brand_section:
@@ -229,8 +165,7 @@ def get_all_main_categories() -> Optional[List[int]]:
     """
     rc = root_categories.load_last_saved_root_categories()
     if not rc:
-        rc = root_categories.get_root_categories(
-            load_most_recent_if_failed=False)
+        rc = root_categories.get_root_categories(load_most_recent_if_failed=False)
     if rc:
         main_categories = [main_category['id'] for main_category in rc['payload']]
         return main_categories
@@ -245,14 +180,62 @@ def run_brands_crawler():
     logger.info(main_categories)
 
     brands_by_category = get_brands_by_category(main_categories)
-    # brands_by_category = get_brands_by_category([10012])
+    # brands_by_category = get_brands_by_category([10020])
 
     if brands_by_category:
-        save_dict_to_file(brands_by_category)
-        logger.info(f"Category brands saved to {data_dir}/brands.")
+        # save_dict_to_file(brands_by_category)
+        save_to_file(file=brands_by_category, file_name='brands_by_category', file_type='JSON', sub_dir=brands_dir, add_date_time=True, separate_folder=False)
+        logger.info(f"Category brands saved to {data_dir}/{brands_dir}.")
     else:
         logger.error("Could not parse brands by categories.")
 
 
 if __name__ == "__main__":
     run_brands_crawler()
+
+
+# def save_dict_to_file(category_dict: Dict[str, List[str]], directory: str = f"{data_dir}/brands", filename: str = "brands_by_category") -> None:
+    #     """
+    #     Save the dictionary to a file as JSON.
+
+    #     Args:
+    #         category_dict (Dict[str, List[str]]): The dictionary containing category data.
+    #         directory (str): The directory where the file should be saved.
+    #         filename (str): The base name of the file.
+
+    #     Returns:
+    #         None
+    #     """
+    #     if not os.path.exists(directory):
+    #         os.makedirs(directory)
+
+    #     with open(f"{directory}/{filename}_{datetime.now().strftime('%Y%m%d_%H%M')}.json", 'w', encoding='utf-8') as file:
+    #         json.dump(category_dict, file, ensure_ascii=False, indent=4)
+    #         logger.info(f"Saved {filename} to {directory}")
+
+    # def load_last_saved_dict(directory: str = f"{data_dir}/brands") -> Optional[Dict[str, List[str]]]:
+    #     """
+    #     Load the most recently saved dictionary from the specified directory.
+
+    #     Args:
+    #         directory (str): The directory to look for JSON files.
+
+    #     Returns:
+    #         Optional[Dict[str, List[str]]]: The loaded dictionary, or None if loading fails.
+    #     """
+    #     list_of_files = glob.glob(os.path.join(directory, '*.json'))
+
+    #     if not list_of_files:
+    #         logger.warning(f"No JSON files found in directory {directory}.")
+    #         return None
+
+    #     latest_file = max(list_of_files, key=os.path.getmtime)
+
+    #     try:
+    #         with open(latest_file, 'r', encoding='utf-8') as file:
+    #             category_dict = json.load(file)
+    #         logger.info(f"Loaded data from {latest_file}.")
+    #         return category_dict
+    #     except json.JSONDecodeError:
+    #         logger.error(f"Error decoding JSON from the file {latest_file}.")
+    #         return None

@@ -7,6 +7,7 @@ import pprint
 import os
 import pickle
 import logging
+import logging.config
 import time
 
 
@@ -20,8 +21,7 @@ class TokenManager:
 
         # Configure logging
         logging_level = os.getenv('LOGGING_LEVEL', 'INFO').upper()
-        logging.basicConfig(level=logging_level,
-                            format='%(asctime)s - %(levelname)s - %(message)s')
+        logging.config.fileConfig('configs/logging.conf')
         self.logger = logging.getLogger()
 
     def load_saved_token(self, name="uzum"):

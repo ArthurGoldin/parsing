@@ -1,8 +1,10 @@
 import http.client
+from operator import le
 import time
 import json
 from datetime import datetime
 import logging
+import logging.config
 import zlib
 import brotli
 import glob
@@ -10,26 +12,20 @@ import os
 import sys
 from typing import List, Dict, Any
 from fake_useragent import UserAgent
+import configparser
+from save_and_load_data import save_to_file
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+import csv
+
+logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
-data_dir = 'data'
+config = configparser.ConfigParser()
+config.read('configs/app.conf')
 
-
-def load_category_tree(file_path: str) -> Dict[str, Any]:
-    """
-    Load category tree from a JSON file.
-
-    Args:
-        file_path (str): Path to the JSON file.
-
-    Returns:
-        Dict[str, Any]: The category tree data.
-    """
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return json.load(file)
+data_dir = config.get('storage', 'data_directory')
+rc_dir = config.get('storage', 'root_categories_sub_dir')
+lc_dir = config.get('storage', 'category_ids_sub_dir')
 
 
 def combine_products_into_tree(category_tree: Dict[str, Any], products_by_category: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,7 +48,7 @@ def combine_products_into_tree(category_tree: Dict[str, Any], products_by_catego
     return category_tree
 
 
-def find_leaf_categories(category_tree: Dict[str, Any]) -> List[Dict[str, Any]]:
+def find_leaf_categories(category_tree: Dict[str, Any], save_leaf_categories: bool = True) -> List[Dict[str, Any]]:
     """
     Recursively find all leaf categories in the category tree.
 
@@ -88,10 +84,15 @@ def find_leaf_categories(category_tree: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     if len(leaf_categories) > 0:
         logger.info(f"Extracted {len(leaf_categories)} categories from root-categories.")
+        if save_leaf_categories:
+            try:
+                save_to_file(leaf_categories, 'leaf_categories', lc_dir, add_date_time=True, separate_folder=False)
+            except Exception as e:
+                logger.error(f'Error in find_leaf_categories: {e}')
     return leaf_categories
 
 
-def load_last_saved_root_categories(directory: str = f'{data_dir}/root_categories') -> Dict[str, Any]:
+def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> Dict[str, Any]:
     """
     Load the last saved root categories JSON file from the specified directory.
 
@@ -187,14 +188,13 @@ def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_
                 content_encoding = response.getheader('Content-Encoding')
 
                 if content_encoding:
-                    response_data = decompress_http_response(
-                        response_data, content_encoding)
+                    response_data = decompress_http_response(response_data, content_encoding)
 
                 decoded_data = response_data.decode('utf-8')
                 if not decoded_data:
                     raise ValueError("Empty response data")
                 root_categories = json.loads(decoded_data)
-                with open(f"{data_dir}/root_categories/root_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
+                with open(f"{data_dir}/{rc_dir}/{rc_dir}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
                     json.dump(root_categories, file, ensure_ascii=False, indent=4)
                 logger.info(f'Collected root-categories from {main_url}')
                 break  # Exit the loop if the request is successful
@@ -225,6 +225,8 @@ def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_
 
 if __name__ == "__main__":
     try:
-        get_root_categories()
+        rc = get_root_categories()
+        lc = find_leaf_categories(rc)
+
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->main: {e}")

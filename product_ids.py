@@ -1,84 +1,86 @@
 import http.client
 import time
 import json
-from datetime import datetime
-import os
-import glob
-import csv
 import logging
+import logging.config
 import zlib
 import brotli
 from typing import List, Tuple, Dict, Any
 from fake_useragent import UserAgent
 import sys
-
+import configparser
 from token_manager import TokenManager
 import graphql_query_generator
+from save_and_load_data import save_to_file, load_last_saved_csv
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
-data_dir = 'data'
+config = configparser.ConfigParser()
+config.read('configs/app.conf')
+
+data_dir = config.get('storage', 'data_directory')
+product_ids_dir = config.get('storage', 'product_ids_sub_dir')
+failed_categories_dir = config.get('storage', 'failed_categories_sub_dir')
 
 token_manager = None
 auth_token = None
 
 
-def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
-    """
-    Save the given data to a CSV file.
+# def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
+#     """
+#     Save the given data to a CSV file.
 
-    Args:
-        file (List[Any]): Data to be saved.
-        file_name (str): Name of the file.
-        sub_dir (str, optional): Sub-directory within the data directory.
-        add_date_time (bool, optional): Whether to append the current datetime to the file name.
-    """
-    dir_path = f"{data_dir}/{sub_dir}"
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
+#     Args:
+#         file (List[Any]): Data to be saved.
+#         file_name (str): Name of the file.
+#         sub_dir (str, optional): Sub-directory within the data directory.
+#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
+#     """
+#     dir_path = f"{data_dir}/{sub_dir}"
+#     if not os.path.exists(dir_path):
+#         os.makedirs(dir_path)
 
-    orig_file_name = file_name
-    if add_date_time:
-        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+#     orig_file_name = file_name
+#     if add_date_time:
+#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
 
-    with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-        writer = csv.writer(write_file)
-        writer.writerow(file)
-        logger.info(f"{orig_file_name} saved to a .csv file in {
-                    data_dir}/{sub_dir}")
+#     with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+#         writer = csv.writer(write_file)
+#         writer.writerow(file)
+#         logger.info(f"{orig_file_name} saved to a .csv file in {
+#                     data_dir}/{sub_dir}")
 
 
-def load_last_saved_csv(directory: str, name: str) -> List[int]:
-    """
-    Load the last saved CSV file from the specified directory.
+# def load_last_saved_csv(directory: str, name: str) -> List[int]:
+#     """
+#     Load the last saved CSV file from the specified directory.
 
-    Args:
-        directory (str): The directory containing the CSV files.
-        name (str): The base name of the CSV files.
+#     Args:
+#         directory (str): The directory containing the CSV files.
+#         name (str): The base name of the CSV files.
 
-    Returns:
-        List[int]: List of integers read from the CSV file.
-    """
-    try:
-        list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
-        if not list_of_files:
-            raise FileNotFoundError(
-                "No csv files found in the directory/category.")
+#     Returns:
+#         List[int]: List of integers read from the CSV file.
+#     """
+#     try:
+#         list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
+#         if not list_of_files:
+#             raise FileNotFoundError(
+#                 "No csv files found in the directory/category.")
 
-        latest_file = max(list_of_files, key=os.path.getctime)
+#         latest_file = max(list_of_files, key=os.path.getctime)
 
-        with open(latest_file, newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            for row in reader:
-                int_list = [int(item) for item in row]
-        logger.info(f"Loaded most recent {
-                    name}. Total items: {len(int_list)}")
-        return int_list
-    except Exception as e:
-        logging.error(f'Failed to load the last saved csv file: {e}')
-        return []
+#         with open(latest_file, newline='') as csvfile:
+#             reader = csv.reader(csvfile)
+#             for row in reader:
+#                 int_list = [int(item) for item in row]
+#         logger.info(f"Loaded most recent {
+#                     name}. Total items: {len(int_list)}")
+#         return int_list
+#     except Exception as e:
+#         logging.error(f'Failed to load the last saved csv file: {e}')
+#         return []
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -312,7 +314,7 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
         logger.info(f"Total unique ids: {len(data_list)} in category {
                     category_id}, return status: {status}")
         if save_category_ids:
-            save_csv(data_list, f'category_{category_id}_pr_ids', 'products_by_category')
+            save_to_file(data_list, f'category_{category_id}_pr_ids', 'products_by_category', separate_folder=False)
     else:
         logger.warning(f"No items collected from category {category_id}, return status: {status}")
 
@@ -344,13 +346,11 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
         p_ids = []
         failed_categories = []
         for category in categories:
-            category_ids, status = get_product_ids_by_category(
-                category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url)
+            category_ids, status = get_product_ids_by_category(category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url)
             if len(category_ids) > 0:
                 p_ids.extend(category_ids)
             if status != 200:
-                failed_categories.append(
-                    {"id": category['id'], "productAmount": category['productAmount'], "status": status})
+                failed_categories.append({"id": category['id'], "productAmount": category['productAmount'], "status": status})
 
         logger.info(f"Total {len(p_ids)} ids fetched.")
         p_ids = list(set(p_ids))
@@ -360,18 +360,17 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
 
         if save_fetched_data:
             if p_ids:
-                save_csv(p_ids, 'product_ids', 'product_ids')
+                save_to_file(p_ids, product_ids_dir, product_ids_dir, separate_folder=False)
 
             if failed_categories:
-                save_csv(failed_categories, 'failed_categories_ids', 'failed_categories')
+                save_to_file(failed_categories, 'failed_categories_ids', failed_categories_dir, separate_folder=False)
                 # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
                 #     json.dump(failed_categories, file,
                 #               ensure_ascii=False, indent=4)
 
         if not p_ids and load_most_recent_if_failed:
             logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")
-            p_ids = load_last_saved_csv(
-                f'{data_dir}/product_ids', 'product_ids')
+            p_ids = load_last_saved_csv(f'{data_dir}/{product_ids_dir}', 'product_ids')
         return p_ids
     else:
         raise FileNotFoundError("Failed to get authorization token.")

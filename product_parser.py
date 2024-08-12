@@ -2,10 +2,8 @@ import http.client
 import time
 import json
 from datetime import datetime
-import os
-import glob
-import csv
 import logging
+import logging.config
 import zlib
 import brotli
 from fake_useragent import UserAgent
@@ -13,106 +11,25 @@ from typing import List, Tuple, Dict, Any
 import sys
 import re
 import argparse
-
-from numpy import character
+import configparser
+from save_and_load_data import load_last_saved_json, load_last_saved_csv, save_to_file
 
 from token_manager import TokenManager
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
-data_dir: str = "data"
+config = configparser.ConfigParser()
+config.read('configs/app.conf')
+
+data_dir = config.get('storage', 'data_directory')
+brands_dir = config.get('storage', 'brands_sub_dir')
+product_ids_dir = config.get('storage', 'product_ids_sub_dir')
+products_dir = config.get('storage', 'products_sub_dir')
 
 token_manager = None
 
 brands_by_category = None
-
-
-def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False) -> None:
-    """
-    Save the given data to a CSV/JSON file.
-
-    Args:
-        file (List[Any]): Data to be saved.
-        file_name (str): Name of the file.
-        sub_dir (str, optional): Sub-directory within the data directory.
-        add_date_time (bool, optional): Whether to append the current datetime to the file name.
-    """
-    dir_path = f"{
-        data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y")}"
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
-    orig_file_name = file_name
-    if add_date_time:
-        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
-    if file_type == "CSV" or file_type == "csv" or file_type == "":
-        with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-            writer = csv.writer(write_file)
-            writer.writerow(file['data'])
-            logger.info(f"{orig_file_name}.csv saved to {dir_path}")
-    if file_type == "JSON" or file_type == "json" or file_type == "":
-        with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
-            json.dump(file, write_file, ensure_ascii=False, indent=4)
-            logger.info(f"{orig_file_name}.json saved to {dir_path}")
-
-
-def load_last_saved_csv(directory: str = f'{data_dir}/product_ids', file_name: str = "product_ids") -> List[int]:
-    """
-    Load the last saved CSV file from the specified directory.
-
-    Args:
-        directory (str): The directory containing the CSV files.
-        name (str): The base name of the CSV files.
-
-    Returns:
-        List[int]: List of integers read from the CSV file.
-    """
-    try:
-        if file_name.endswith('.csv'):
-            logger.info(f'Loading {file_name} from {directory}')
-            latest_file_path = f"{directory}/{file_name}"
-        else:
-            list_of_files = glob.glob(os.path.join(
-                directory, f'{file_name}_*.csv'))
-            if not list_of_files:
-                raise FileNotFoundError(
-                    "No csv files found in the directory/category.")
-            latest_file_path = max(list_of_files, key=os.path.getctime)
-
-            logger.info(f'Loading {latest_file_path}')
-
-        with open(latest_file_path, newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            for row in reader:
-                int_list = [int(item) for item in row]
-        return int_list
-    except Exception as e:
-        logging.error(f'Failed to load the last saved csv file: {e}')
-        return None
-
-
-def load_last_saved_dict(directory=f"{data_dir}/brands"):
-    # Find all JSON files in the directory
-    list_of_files = glob.glob(os.path.join(directory, '*.json'))
-
-    if not list_of_files:
-        logger.warning(f"No JSON files found in directory {directory}.")
-        return None
-
-    # Get the latest file by modification time
-    latest_file = max(list_of_files, key=os.path.getmtime)
-
-    # Load the dictionary from the latest file
-    try:
-        with open(latest_file, 'r', encoding='utf-8') as file:
-            category_dict = json.load(file)
-        logger.info(f"Loaded data from {latest_file}.")
-        return category_dict
-    except json.JSONDecodeError:
-        logger.error(f"Error decoding JSON from the file {latest_file}.")
-        return None
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -251,7 +168,7 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
         Tuple[List[Dict[str, Any]], List[int]]: A tuple containing the list of product details and the list of failed product IDs.
     """
     global brands_by_category
-    brands_by_category = load_last_saved_dict()
+    brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
 
     host = product_api_url.split("//")[1].split('/')[0]
     endpoint_base = product_api_url.split('https://' + host)[1]
@@ -405,13 +322,13 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
                 'platform': 'UZUM',
                 'data': data_list
             }
-            save_to_file(data_to_save, 'products', 'products')
+            save_to_file(data_to_save, 'products', products_dir)
     else:
         logger.warning('Zero products parsed!')
     if failed_product_ids:
         logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
         if save_data:
-            save_to_file(failed_product_ids, 'failed_product_ids', 'products', file_type="CSV")
+            save_to_file(failed_product_ids, 'failed_product_ids', products_dir, file_type="CSV")
 
     return data_list, failed_product_ids
 
@@ -437,27 +354,111 @@ if __name__ == "__main__":
     if args.load:
         file_name = args.load
         if file_name:
-            logger.info(f"Loading IDs data from file: {file_name}.")
-            product_list = load_last_saved_csv(file_name=file_name)
+            logger.info(f"Loading IDs data from file: {file_name}")
+            product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}', file_name=file_name)
         else:
             logger.info(
-                f"Loading the last saved IDs from: {data_dir}/product_ids.")
-            product_list = load_last_saved_csv()
+                f"Loading the last saved IDs from: {data_dir}/product_ids")
+            product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}')
     elif args.product_ids and are_integers(args.product_ids):
-        brands_by_category = load_last_saved_dict()
         product_list = args.product_ids
     else:
         logger.info(f"Loading last saved product IDs in {
                     data_dir}/product_ids.")
-        product_list = load_last_saved_csv()
+        product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}')
 
     if product_list:
-        brands_by_category = load_last_saved_dict()
+        brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
         if not brands_by_category:
-            logger.warning("Could not load main categories brands.")
+            logger.warning("Could not load main categories brands")
 
         logger.info("Starting to parse products from the input...")
         try:
             fetch_products(product_list)
         except Exception as e:
             logger.error(f"In {sys.argv[0]}->main: {e}")
+
+
+# def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False) -> None:
+#     """
+#     Save the given data to a CSV/JSON file.
+
+#     Args:
+#         file (List[Any]): Data to be saved.
+#         file_name (str): Name of the file.
+#         sub_dir (str, optional): Sub-directory within the data directory.
+#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
+#     """
+#     dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y")}"
+#     if not os.path.exists(dir_path):
+#         os.makedirs(dir_path)
+#     orig_file_name = file_name
+#     if add_date_time:
+#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+#     if file_type == "CSV" or file_type == "csv" or file_type == "":
+#         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+#             writer = csv.writer(write_file)
+#             writer.writerow(file['data'])
+#             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
+#     if file_type == "JSON" or file_type == "json" or file_type == "":
+#         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
+#             json.dump(file, write_file, ensure_ascii=False, indent=4)
+#             logger.info(f"{orig_file_name}.json saved to {dir_path}")
+
+
+# def load_last_saved_csv(directory: str = f'{data_dir}/{product_ids_dir}', file_name: str = "product_ids") -> List[int]:
+#     """
+#     Load the last saved CSV file from the specified directory.
+
+#     Args:
+#         directory (str): The directory containing the CSV files.
+#         name (str): The base name of the CSV files.
+
+#     Returns:
+#         List[int]: List of integers read from the CSV file.
+#     """
+#     try:
+#         if file_name.endswith('.csv'):
+#             logger.info(f'Loading {file_name} from {directory}')
+#             latest_file_path = f"{directory}/{file_name}"
+#         else:
+#             list_of_files = glob.glob(os.path.join(
+#                 directory, f'{file_name}_*.csv'))
+#             if not list_of_files:
+#                 raise FileNotFoundError(
+#                     "No csv files found in the directory/category.")
+#             latest_file_path = max(list_of_files, key=os.path.getctime)
+
+#             logger.info(f'Loading {latest_file_path}')
+
+#         with open(latest_file_path, newline='') as csvfile:
+#             reader = csv.reader(csvfile)
+#             for row in reader:
+#                 int_list = [int(item) for item in row]
+#         return int_list
+#     except Exception as e:
+#         logging.error(f'Failed to load the last saved csv file: {e}')
+#         return None
+
+
+# def load_last_saved_dict(directory=f"{data_dir}/brands"):
+#     # Find all JSON files in the directory
+#     list_of_files = glob.glob(os.path.join(directory, '*.json'))
+
+#     if not list_of_files:
+#         logger.warning(f"No JSON files found in directory {directory}.")
+#         return None
+
+#     # Get the latest file by modification time
+#     latest_file = max(list_of_files, key=os.path.getmtime)
+
+#     # Load the dictionary from the latest file
+#     try:
+#         with open(latest_file, 'r', encoding='utf-8') as file:
+#             category_dict = json.load(file)
+#         logger.info(f"Loaded data from {latest_file}.")
+#         return category_dict
+#     except json.JSONDecodeError:
+#         logger.error(f"Error decoding JSON from the file {latest_file}.")
+#         return None
