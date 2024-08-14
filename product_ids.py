@@ -11,7 +11,7 @@ import sys
 import configparser
 from token_manager import TokenManager
 import graphql_query_generator
-from save_and_load_data import save_to_file, load_last_saved_csv
+from save_and_load_data import save_to_file, load_last_saved_csv, load_last_saved_json
 
 logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
@@ -25,62 +25,6 @@ failed_categories_dir = config.get('storage', 'failed_categories_sub_dir')
 
 token_manager = None
 auth_token = None
-
-
-# def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
-#     """
-#     Save the given data to a CSV file.
-
-#     Args:
-#         file (List[Any]): Data to be saved.
-#         file_name (str): Name of the file.
-#         sub_dir (str, optional): Sub-directory within the data directory.
-#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
-#     """
-#     dir_path = f"{data_dir}/{sub_dir}"
-#     if not os.path.exists(dir_path):
-#         os.makedirs(dir_path)
-
-#     orig_file_name = file_name
-#     if add_date_time:
-#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
-#     with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-#         writer = csv.writer(write_file)
-#         writer.writerow(file)
-#         logger.info(f"{orig_file_name} saved to a .csv file in {
-#                     data_dir}/{sub_dir}")
-
-
-# def load_last_saved_csv(directory: str, name: str) -> List[int]:
-#     """
-#     Load the last saved CSV file from the specified directory.
-
-#     Args:
-#         directory (str): The directory containing the CSV files.
-#         name (str): The base name of the CSV files.
-
-#     Returns:
-#         List[int]: List of integers read from the CSV file.
-#     """
-#     try:
-#         list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
-#         if not list_of_files:
-#             raise FileNotFoundError(
-#                 "No csv files found in the directory/category.")
-
-#         latest_file = max(list_of_files, key=os.path.getctime)
-
-#         with open(latest_file, newline='') as csvfile:
-#             reader = csv.reader(csvfile)
-#             for row in reader:
-#                 int_list = [int(item) for item in row]
-#         logger.info(f"Loaded most recent {
-#                     name}. Total items: {len(int_list)}")
-#         return int_list
-#     except Exception as e:
-#         logging.error(f'Failed to load the last saved csv file: {e}')
-#         return []
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -370,7 +314,7 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
 
         if not p_ids and load_most_recent_if_failed:
             logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")
-            p_ids = load_last_saved_csv(f'{data_dir}/{product_ids_dir}', 'product_ids')
+            p_ids = load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
         return p_ids
     else:
         raise FileNotFoundError("Failed to get authorization token.")
@@ -398,3 +342,59 @@ if __name__ == "__main__":
             logger.error(f"In {sys.argv[0]}->main: {e}")
     else:
         logger.error("Wrong input arguments.")
+
+
+# def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
+#     """
+#     Save the given data to a CSV file.
+
+#     Args:
+#         file (List[Any]): Data to be saved.
+#         file_name (str): Name of the file.
+#         sub_dir (str, optional): Sub-directory within the data directory.
+#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
+#     """
+#     dir_path = f"{data_dir}/{sub_dir}"
+#     if not os.path.exists(dir_path):
+#         os.makedirs(dir_path)
+
+#     orig_file_name = file_name
+#     if add_date_time:
+#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+#     with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+#         writer = csv.writer(write_file)
+#         writer.writerow(file)
+#         logger.info(f"{orig_file_name} saved to a .csv file in {
+#                     data_dir}/{sub_dir}")
+
+
+# def load_last_saved_csv(directory: str, name: str) -> List[int]:
+#     """
+#     Load the last saved CSV file from the specified directory.
+
+#     Args:
+#         directory (str): The directory containing the CSV files.
+#         name (str): The base name of the CSV files.
+
+#     Returns:
+#         List[int]: List of integers read from the CSV file.
+#     """
+#     try:
+#         list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
+#         if not list_of_files:
+#             raise FileNotFoundError(
+#                 "No csv files found in the directory/category.")
+
+#         latest_file = max(list_of_files, key=os.path.getctime)
+
+#         with open(latest_file, newline='') as csvfile:
+#             reader = csv.reader(csvfile)
+#             for row in reader:
+#                 int_list = [int(item) for item in row]
+#         logger.info(f"Loaded most recent {
+#                     name}. Total items: {len(int_list)}")
+#         return int_list
+#     except Exception as e:
+#         logging.error(f'Failed to load the last saved csv file: {e}')
+#         return []

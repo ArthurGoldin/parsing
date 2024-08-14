@@ -72,10 +72,9 @@ def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[in
             latest_file_path = f"{directory}/{file_name}"
         else:
             list_of_files = glob.glob(os.path.join(
-                directory, f'{file_name}_*.csv'))
+                directory, f'{file_name}*.csv'))
             if not list_of_files:
-                raise FileNotFoundError(
-                    "No csv files found in the directory/category.")
+                raise FileNotFoundError(f"No CSV files found in the {directory}.")
             latest_file_path = max(list_of_files, key=os.path.getctime)
 
             logger.info(f'Loading {latest_file_path}')
@@ -86,29 +85,43 @@ def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[in
                 int_list = [int(item) for item in row]
         return int_list
     except Exception as e:
-        logging.error(f'Failed to load the last saved csv file: {e}')
+        logging.error(f'Failed to load the last saved CSV file: {e}')
         return None
 
 
-def load_last_saved_json(directory: str = "data"):
-    # Find all JSON files in the directory
-    list_of_files = glob.glob(os.path.join(directory, '*.json'))
+def load_last_saved_json(directory: str = "data", file_name: str = "") -> List[int]:
+    """
+    Load the last saved JSON file from the specified directory.
 
-    if not list_of_files:
-        logger.warning(f"No JSON files found in directory {directory}.")
-        return None
+    Args:
+        directory (str): The directory containing the JSON files.
+        name (str): The base name of the JSON files.
 
-    # Get the latest file by modification time
-    latest_file = max(list_of_files, key=os.path.getmtime)
-
-    # Load the dictionary from the latest file
+    Returns:
+        List[int]: List of integers read from the JSON file.
+    """
     try:
-        with open(latest_file, 'r', encoding='utf-8') as file:
+        if file_name.endswith('.json'):
+            logger.info(f'Loading {file_name} from {directory}')
+            latest_file_path = f"{directory}/{file_name}"
+        else:
+            list_of_files = glob.glob(os.path.join(
+                directory, f'{file_name}*.json'))
+            if not list_of_files:
+                raise FileNotFoundError(f"No JSON files found in directory {directory}.")
+            latest_file_path = max(list_of_files, key=os.path.getctime)
+
+            logger.info(f'Loading {latest_file_path}')
+
+        with open(latest_file_path, 'r', encoding='utf-8') as file:
             category_dict = json.load(file)
-        logger.info(f"Loaded data from {latest_file}.")
+        logger.info(f"Loaded data from {latest_file_path}.")
         return category_dict
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        return None
     except json.JSONDecodeError:
-        logger.error(f"Error decoding JSON from the file {latest_file}.")
+        logger.error(f"Error decoding JSON from the file {latest_file_path}.")
         return None
 
 

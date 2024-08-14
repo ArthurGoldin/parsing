@@ -12,7 +12,7 @@ import sys
 import re
 import argparse
 import configparser
-from save_and_load_data import load_last_saved_json, load_last_saved_csv, save_to_file
+from save_and_load_data import load_last_saved_json, save_to_file
 
 from token_manager import TokenManager
 
@@ -328,7 +328,7 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
     if failed_product_ids:
         logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
         if save_data:
-            save_to_file(failed_product_ids, 'failed_product_ids', products_dir, file_type="CSV")
+            save_to_file(failed_product_ids, 'failed_product_ids', products_dir, file_type="JSON")
 
     return data_list, failed_product_ids
 
@@ -355,17 +355,17 @@ if __name__ == "__main__":
         file_name = args.load
         if file_name:
             logger.info(f"Loading IDs data from file: {file_name}")
-            product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}', file_name=file_name)
+            product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}', file_name=file_name)
         else:
             logger.info(
                 f"Loading the last saved IDs from: {data_dir}/product_ids")
-            product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}')
+            product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}')
     elif args.product_ids and are_integers(args.product_ids):
         product_list = args.product_ids
     else:
         logger.info(f"Loading last saved product IDs in {
                     data_dir}/product_ids.")
-        product_list = load_last_saved_csv(directory=f'{data_dir}/{product_ids_dir}')
+        product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}')
 
     if product_list:
         brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
