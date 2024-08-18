@@ -13,6 +13,7 @@ import re
 import argparse
 import configparser
 from save_and_load_data import load_last_saved_json, save_to_file
+from image_download import download_image
 
 from token_manager import TokenManager
 
@@ -26,6 +27,7 @@ data_dir = config.get('storage', 'data_directory')
 brands_dir = config.get('storage', 'brands_sub_dir')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 products_dir = config.get('storage', 'products_sub_dir')
+images_dir = config.get('storage', 'images_sub_dir')
 
 token_manager = None
 
@@ -99,10 +101,14 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
 
         if not payload:
             raise ValueError("Payload or data is missing in the JSON file.")
-        if payload.get('category', {}).get('title', None) == "Смартфоны Apple iPhone(iOS)":
+
+        if payload.get('category', {}).get('title', None).lower() == "Смартфоны Apple iPhone(iOS)".lower():
             brand = ["Apple"]
         else:
             brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(payload)}']) if brands_by_category else ''
+
+        image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None), payload.get('id', None), f'{data_dir}/{images_dir}')
+
         result = {
             'id': payload.get('id', None),
             'title': payload.get('title', None),
@@ -118,7 +124,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
             'ordersAmount': payload.get('ordersAmount', None),
             'totalAvailableAmount': payload.get('totalAvailableAmount', None),
             'url': f'{main_url}/product/{payload.get("id", None)}',
-            'photo': payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None),
+            'photo': image_path,
             'skuList': [{
                 'characteristics': [{
                     'id': characteristic_data[char.get('charIndex', None)]['id'],
@@ -368,9 +374,9 @@ if __name__ == "__main__":
         product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}')
 
     if product_list:
-        brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
-        if not brands_by_category:
-            logger.warning("Could not load main categories brands")
+        # brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
+        # if not brands_by_category:
+        #     logger.warning("Could not load main categories brands")
 
         logger.info("Starting to parse products from the input...")
         try:

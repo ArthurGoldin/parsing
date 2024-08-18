@@ -4,4 +4,4 @@ __pycache__/
 data
 old
 parsing.code-workspace
-app.log
+logs

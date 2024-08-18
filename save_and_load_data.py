@@ -31,7 +31,7 @@ def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: 
     if file_type == "CSV" or file_type == "csv" or file_type == "":
         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
             writer = csv.writer(write_file)
-            writer.writerow(file)
+            writer.writerow(file['data'] if 'data' in file else file)
             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
     if file_type == "JSON" or file_type == "json" or file_type == "":
         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
@@ -84,8 +84,11 @@ def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[in
             for row in reader:
                 int_list = [int(item) for item in row]
         return int_list
-    except Exception as e:
+    except FileNotFoundError as e:
         logging.error(f'Failed to load the last saved CSV file: {e}')
+        return None
+    except csv.Error:
+        logging.error(f"Error decoding CSV from the file {latest_file_path}.")
         return None
 
 
