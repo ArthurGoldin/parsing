@@ -55,7 +55,7 @@ def fetch_data() -> None:
 
         logger.info('Parsing products...')
         products, failed_products_ids = product_parser.fetch_products(p_ids)
-        logger.info(f"Products fetched: {len(products)}; failed count: {len(failed_products_ids)}")
+        logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
 
     except Exception as e:
         logger.error(f"Could not fetch data: {e}. Exiting...")

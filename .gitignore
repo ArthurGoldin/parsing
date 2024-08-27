@@ -1,7 +1,8 @@
 __pycache__/
 .vscode/
 .venv
-data
-old
+
+app/old
+app/data
 parsing.code-workspace
-logs
+app/logs
