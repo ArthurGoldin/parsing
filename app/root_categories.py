@@ -15,7 +15,6 @@ from fake_useragent import UserAgent
 import configparser
 from save_and_load_data import save_to_file
 
-import csv
 
 logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
@@ -48,7 +47,7 @@ def combine_products_into_tree(category_tree: Dict[str, Any], products_by_catego
     return category_tree
 
 
-def find_leaf_categories(category_tree: Dict[str, Any], save_leaf_categories: bool = True) -> List[Dict[str, Any]]:
+def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, sort_result: bool = True) -> List[Dict[str, Any]]:
     """
     Recursively find all leaf categories in the category tree.
 
@@ -83,8 +82,10 @@ def find_leaf_categories(category_tree: Dict[str, Any], save_leaf_categories: bo
         logger.error(f"Failed to find leaf categories: {e}")
 
     if len(leaf_categories) > 0:
+        if sort_result:
+            leaf_categories = sorted(leaf_categories, key=lambda x: x['id'])
         logger.info(f"Extracted {len(leaf_categories)} categories from root-categories.")
-        if save_leaf_categories:
+        if save_data:
             try:
                 save_to_file(leaf_categories, 'leaf_categories', lc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
@@ -122,7 +123,12 @@ def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> 
         return None
 
 
-def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false", main_url: str = "https://uzum.uz/ru", load_most_recent_if_failed: bool = True) -> Dict[str, Any]:
+def get_root_categories(request_retries: int = 8,
+                        backoff_factor: int = 1,
+                        root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
+                        main_url: str = "https://uzum.uz/ru",
+                        load_most_recent_if_failed: bool = True,
+                        save_data: bool = True) -> Dict[str, Any]:
     """
     Fetch root categories from the API, with retries and backoff on failure.
 
@@ -194,8 +200,12 @@ def get_root_categories(request_retries: int = 8, backoff_factor: int = 1, root_
                 if not decoded_data:
                     raise ValueError("Empty response data")
                 root_categories = json.loads(decoded_data)
-                with open(f"{data_dir}/{rc_dir}/{rc_dir}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                    json.dump(root_categories, file, ensure_ascii=False, indent=4)
+                if save_data:
+                    try:
+                        save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
+                    except Exception as e:
+                        logger.error(f'Error in get_root_categories: {e}')
+
                 logger.info(f'Collected root-categories from {main_url}')
                 break  # Exit the loop if the request is successful
             else:

@@ -1,7 +1,6 @@
 import http.client
 import time
 import json
-from datetime import datetime
 import logging
 import logging.config
 import zlib
@@ -14,6 +13,7 @@ import argparse
 import configparser
 from save_and_load_data import load_last_saved_json, save_to_file
 from image_download import download_image
+from send_data_to_db import send_message
 
 from token_manager import TokenManager
 
@@ -124,7 +124,8 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
             'ordersAmount': payload.get('ordersAmount', None),
             'totalAvailableAmount': payload.get('totalAvailableAmount', None),
             'url': f'{main_url}/product/{payload.get("id", None)}',
-            'photo': image_path,
+            # 'photo': image_path,
+            'photo': payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None),
             'skuList': [{
                 'characteristics': [{
                     'id': characteristic_data[char.get('charIndex', None)]['id'],
@@ -161,7 +162,13 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
         return None, str(e)
 
 
-def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: int = 1, product_api_url: str = "https://api.uzum.uz/api/v2/product/", main_url: str = "https://uzum.uz/ru", save_data: bool = True, **kwargs) -> Tuple[List[Dict[str, Any]], List[int]]:
+def fetch_products(p_ids: List[int],
+                   request_retries: int = 10,
+                   backoff_factor: int = 1,
+                   product_api_url: str = "https://api.uzum.uz/api/v2/product/",
+                   main_url: str = "https://uzum.uz/ru",
+                   save_data: bool = True,
+                   **kwargs) -> Tuple[List[Dict[str, Any]], List[int]]:
     """
     Fetch product details for the given product IDs with retries and backoff on failure.
 
@@ -212,6 +219,7 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
     }
 
     data_list = []
+    total_data_list = []
     failed_product_ids = []
     request_attempts = 0
     ind = 0
@@ -226,6 +234,14 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
 
     try:
         conn = http.client.HTTPSConnection(host)
+
+        # Store data main structure
+        data_to_save = {
+            'platform': 'UZUM',
+            'data': []
+        }
+        save_to_file(data_to_save, 'products', products_dir)
+
         while ind < len(p_ids):
             if request_attempts > request_retries:
                 logger.error('Exceeded max number of retries!')
@@ -282,6 +298,16 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
                     data, errors = parse_product(json_data)
                     if data:
                         data_list.append(data)
+                        data_to_send = {
+                            'platform': 'UZUM',
+                            'data': [data]
+                        }
+                        # send to RabbitMQ
+                        try:
+                            send_message(data_to_send)
+                        except Exception as e:
+                            logger.error(f'Sending RabbitMQ message to broker failed:{e}')
+
                     else:
                         logger.error(
                             f'Could not parse data from product ID {product_id}.')
@@ -291,6 +317,13 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
                     request_attempts = 0
                     ind += 1
                     if ind % 100 == 0:
+                        if data_list and save_data:
+                            data_to_save = {
+                                'data': data_list
+                            }
+                            save_to_file(data_to_save, 'products', products_dir, override_file=False)
+                        total_data_list.extend(data_list)
+                        data_list = []
                         logger.info(f'Processed {ind} products.')
 
                 elif response.status == 401:
@@ -313,8 +346,14 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
                     raise ValueError(f"Bad response status on a product API: {
                         response.status}")
             except Exception as e:
-                logger.error(
-                    f'Failed to receive data from a product API: {e}')
+                if save_data and data_list:
+                    data_to_save = {
+                        'data': data_list
+                    }
+                    save_to_file(data_to_save, 'products', products_dir, override_file=False)
+                    total_data_list.extend(data_list)
+                    data_list = []
+                logger.error(f'Failed to receive data from a product API: {e}')
                 break
     except Exception as e:
         logger.error(f"In fetch_product: {e}")
@@ -322,13 +361,13 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
         conn.close()
 
     if data_list:
-        logger.info(f'Finished parsing {len(data_list)} products.')
+        total_data_list.extend(data_list)
+        logger.info(f'Finished parsing {len(total_data_list)} products.')
         if save_data:
             data_to_save = {
-                'platform': 'UZUM',
                 'data': data_list
             }
-            save_to_file(data_to_save, 'products', products_dir)
+            save_to_file(data_to_save, 'products', products_dir, override_file=False)
     else:
         logger.warning('Zero products parsed!')
     if failed_product_ids:
@@ -336,7 +375,7 @@ def fetch_products(p_ids: List[int], request_retries: int = 10, backoff_factor: 
         if save_data:
             save_to_file(failed_product_ids, 'failed_product_ids', products_dir, file_type="JSON")
 
-    return data_list, failed_product_ids
+    return total_data_list, failed_product_ids
 
 
 def are_integers(args):
@@ -349,7 +388,7 @@ def are_integers(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Process product data.')
+    parser = argparse.ArgumentParser(description='Processing of product data.')
     parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
                         help='an integer for the product ID to process')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
@@ -367,6 +406,7 @@ if __name__ == "__main__":
                 f"Loading the last saved IDs from: {data_dir}/product_ids")
             product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}')
     elif args.product_ids and are_integers(args.product_ids):
+        logger.info(f'Parsing product with ID: {args.product_ids}')
         product_list = args.product_ids
     else:
         logger.info(f"Loading last saved product IDs in {
@@ -383,88 +423,3 @@ if __name__ == "__main__":
             fetch_products(product_list)
         except Exception as e:
             logger.error(f"In {sys.argv[0]}->main: {e}")
-
-
-# def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False) -> None:
-#     """
-#     Save the given data to a CSV/JSON file.
-
-#     Args:
-#         file (List[Any]): Data to be saved.
-#         file_name (str): Name of the file.
-#         sub_dir (str, optional): Sub-directory within the data directory.
-#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
-#     """
-#     dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y")}"
-#     if not os.path.exists(dir_path):
-#         os.makedirs(dir_path)
-#     orig_file_name = file_name
-#     if add_date_time:
-#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
-#     if file_type == "CSV" or file_type == "csv" or file_type == "":
-#         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-#             writer = csv.writer(write_file)
-#             writer.writerow(file['data'])
-#             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
-#     if file_type == "JSON" or file_type == "json" or file_type == "":
-#         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
-#             json.dump(file, write_file, ensure_ascii=False, indent=4)
-#             logger.info(f"{orig_file_name}.json saved to {dir_path}")
-
-
-# def load_last_saved_csv(directory: str = f'{data_dir}/{product_ids_dir}', file_name: str = "product_ids") -> List[int]:
-#     """
-#     Load the last saved CSV file from the specified directory.
-
-#     Args:
-#         directory (str): The directory containing the CSV files.
-#         name (str): The base name of the CSV files.
-
-#     Returns:
-#         List[int]: List of integers read from the CSV file.
-#     """
-#     try:
-#         if file_name.endswith('.csv'):
-#             logger.info(f'Loading {file_name} from {directory}')
-#             latest_file_path = f"{directory}/{file_name}"
-#         else:
-#             list_of_files = glob.glob(os.path.join(
-#                 directory, f'{file_name}_*.csv'))
-#             if not list_of_files:
-#                 raise FileNotFoundError(
-#                     "No csv files found in the directory/category.")
-#             latest_file_path = max(list_of_files, key=os.path.getctime)
-
-#             logger.info(f'Loading {latest_file_path}')
-
-#         with open(latest_file_path, newline='') as csvfile:
-#             reader = csv.reader(csvfile)
-#             for row in reader:
-#                 int_list = [int(item) for item in row]
-#         return int_list
-#     except Exception as e:
-#         logging.error(f'Failed to load the last saved csv file: {e}')
-#         return None
-
-
-# def load_last_saved_dict(directory=f"{data_dir}/brands"):
-#     # Find all JSON files in the directory
-#     list_of_files = glob.glob(os.path.join(directory, '*.json'))
-
-#     if not list_of_files:
-#         logger.warning(f"No JSON files found in directory {directory}.")
-#         return None
-
-#     # Get the latest file by modification time
-#     latest_file = max(list_of_files, key=os.path.getmtime)
-
-#     # Load the dictionary from the latest file
-#     try:
-#         with open(latest_file, 'r', encoding='utf-8') as file:
-#             category_dict = json.load(file)
-#         logger.info(f"Loaded data from {latest_file}.")
-#         return category_dict
-#     except json.JSONDecodeError:
-#         logger.error(f"Error decoding JSON from the file {latest_file}.")
-#         return None

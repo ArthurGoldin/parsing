@@ -1,20 +1,63 @@
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
 
+# Set environment variable to avoid some issues in headless mode
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Install dependencies including curl, wget, unzip, and Xvfb
+RUN apt-get update && apt-get install -y wget gnupg ca-certificates curl unzip xvfb
 
-# Install any needed packages specified in requirements.txt
+# Install Google Chrome
+RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+RUN apt install -y ./google-chrome-stable_current_amd64.deb
+
+# Install Chromedriver
+RUN wget -q "https://chromedriver.storage.googleapis.com/$(curl -s chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver_linux64.zip" -O /tmp/chromedriver.zip \
+    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
+    && rm /tmp/chromedriver.zip \
+    && chmod +x /usr/local/bin/chromedriver
+
+# Verify installation of Chrome and Chromedriver
+RUN google-chrome --version || (echo 'Google Chrome was not installed' && exit 1)
+RUN chromedriver --version || (echo 'Chromedriver was not installed' && exit 1)
+
+# Copy the requirements file and install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Make port 80 available to the world outside this container
-EXPOSE 80
+# Copy the rest of the application code
+COPY app/ /app
 
-# Define environment variable
-ENV NAME World
+# Copy the entrypoint script and set it as executable
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Run the application
-CMD ["python", "your_script.py"]
+# Set the entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["python3", "system_check.py"]
+
+
+# # Use an official Python runtime as a parent image
+# FROM python:3.12-slim
+
+# # Set the working directory in the container
+# WORKDIR /app
+
+# # Copy the requirements file first, so Docker caches the pip install layer
+# COPY requirements.txt requirements.txt
+
+# # Install any needed packages specified in requirements.txt
+# RUN pip install --no-cache-dir -r requirements.txt
+
+# # Copy the rest of the application code to the working directory in the container
+# COPY . .
+
+# # If you want to set an environment variable (optional)
+# # ENV MY_ENV_VAR=some_value
+
+# # Expose port 8000 if your application runs on this port
+# # EXPOSE 8000

@@ -1,9 +1,17 @@
 import os
 import requests
 import logging
-import logging.config
+# import logging.config
 
-logging.config.fileConfig('configs/logging.conf')
+# logging.config.fileConfig('configs/logging.conf')
+# logger = logging.getLogger()
+# # Adjust the logging level for the console handler only for this specific module
+# for handler in logger.handlers:
+#     if isinstance(handler, logging.StreamHandler):  # Ensure we only modify the console handler
+#         handler.setLevel(logging.WARNING)  # Set console output to WARNING and higher for this module
+
+logging.basicConfig(level=logging.WARNING,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 
@@ -17,7 +25,7 @@ def download_image(
     image_path = os.path.join(directory, f"{product_id}.jpg")
 
     if os.path.exists(image_path):
-        logger.info(f"Image already exists: {image_path}")
+        logger.warning(f"Image already exists: {image_path}")
         return image_path
 
     logger.info(f"Start to download image for product {product_id} from: {url}")

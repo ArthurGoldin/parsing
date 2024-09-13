@@ -1,3 +1,5 @@
+from typing import List, Any, Dict, Union
+from typing import List, Any
 from datetime import datetime
 from typing import List, Any, Dict
 import os
@@ -11,32 +13,94 @@ logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
 
 
-def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False, data_dir: str = 'data', separate_folder: bool = True) -> None:
+# def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False, data_dir: str = 'data', separate_folder: bool = True) -> None:
+#     """
+#     Save the given data to a CSV/JSON file.
+
+#     Args:
+#         file (List[Any]): Data to be saved.
+#         file_name (str): Name of the file.
+#         sub_dir (str, optional): Sub-directory within the data directory.
+#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
+#     """
+#     dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y") if separate_folder else ""}"
+#     if not os.path.exists(dir_path):
+#         os.makedirs(dir_path)
+#     orig_file_name = file_name
+#     if add_date_time:
+#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+#     if file_type == "CSV" or file_type == "csv" or file_type == "":
+#         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+#             writer = csv.writer(write_file)
+#             writer.writerow(file['data'] if 'data' in file else file)
+#             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
+#     if file_type == "JSON" or file_type == "json" or file_type == "":
+#         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
+#             json.dump(file, write_file, ensure_ascii=False, indent=4)
+#             logger.info(f"{orig_file_name}.json saved to {dir_path}")
+
+
+def save_to_file(file: Union[List[Any], Dict[str, Any]],
+                 file_name: str,
+                 sub_dir: str = "",
+                 data_dir: str = 'data',
+                 file_type: str = "",
+                 add_date_time: bool = True,
+                 separate_folder: bool = False,
+                 override_file: bool = True) -> None:
     """
-    Save the given data to a CSV/JSON file.
+    Save the given data to a CSV/JSON file. If the file exists, the data will be appended by default or overridden based on the override_file flag.
 
     Args:
-        file (List[Any]): Data to be saved.
-        file_name (str): Name of the file.
-        sub_dir (str, optional): Sub-directory within the data directory.
-        add_date_time (bool, optional): Whether to append the current datetime to the file name.
+        file (Union[List[Any], Dict[str, Any]]): Data to be saved. For JSON files, it can be a dictionary with a nested structure or a list of dictionaries. 
+        file_name (str): Name of the file. The extension is automatically determined by the file_type argument.
+        sub_dir (str, optional): Sub-directory within the data directory where the file will be saved. Defaults to "" (root data directory).
+        file_type (str, optional): Type of the file to be saved. Accepts "csv" or "json". If not specified, CSV is assumed.
+        add_date_time (bool, optional): Whether to append the current datetime to the file name. Defaults to False.
+        data_dir (str, optional): Root data directory where files will be saved. Defaults to 'data'.
+        separate_folder (bool, optional): Whether to create a separate folder for each day using the current date. Defaults to True.
+        override_file (bool, optional): Whether to override the file if it exists. Defaults to False, meaning data will be appended.
+
+    Returns:
+        None: The function saves the data to the specified file and does not return anything.
     """
-    dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y") if separate_folder else ""}"
+    dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%Y%m%d") if separate_folder else ''}"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     orig_file_name = file_name
     if add_date_time:
-        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d")}'
 
-    if file_type == "CSV" or file_type == "csv" or file_type == "":
-        with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
+    if file_type.lower() == "csv":  # or file_type == "":
+        file_path_csv = f'{dir_path}/{file_name}.csv'
+        write_method = 'w' if override_file else 'a'
+        with open(file_path_csv, write_method, newline='') as write_file:
             writer = csv.writer(write_file)
-            writer.writerow(file['data'] if 'data' in file else file)
+            writer.writerow(file['data'])
             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
-    if file_type == "JSON" or file_type == "json" or file_type == "":
-        with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
-            json.dump(file, write_file, ensure_ascii=False, indent=4)
-            logger.info(f"{orig_file_name}.json saved to {dir_path}")
+
+    if file_type.lower() == "json" or file_type == "":
+        file_path_json = f"{dir_path}/{file_name}.json"
+        if os.path.exists(file_path_json) and not override_file:
+            with open(file_path_json, 'r+', encoding='utf-8') as write_file:
+                existing_data = json.load(write_file)
+                if isinstance(existing_data, dict) and 'data' in existing_data:
+                    if isinstance(file, dict) and 'data' in file:
+                        existing_data['data'].extend(file['data'])
+                    else:
+                        existing_data['data'].extend(file)
+                else:
+                    if isinstance(existing_data, list):
+                        existing_data.extend(file)
+                    else:
+                        existing_data.update(file)
+                write_file.seek(0)
+                json.dump(existing_data, write_file, ensure_ascii=False, indent=4)
+        else:
+            with open(file_path_json, 'w', encoding='utf-8') as write_file:
+                json.dump(file, write_file, ensure_ascii=False, indent=4)
+        logger.info(f"{orig_file_name}.json saved to {dir_path}")
 
 
 def save_html_to_file(html: str, filename: str) -> None:
@@ -92,7 +156,7 @@ def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[in
         return None
 
 
-def load_last_saved_json(directory: str = "data", file_name: str = "") -> List[int]:
+def load_last_saved_json(directory: str = "data", file_name: str = "") -> List:
     """
     Load the last saved JSON file from the specified directory.
 
@@ -101,7 +165,7 @@ def load_last_saved_json(directory: str = "data", file_name: str = "") -> List[i
         name (str): The base name of the JSON files.
 
     Returns:
-        List[int]: List of integers read from the JSON file.
+        List[int]: List from json
     """
     try:
         if file_name.endswith('.json'):

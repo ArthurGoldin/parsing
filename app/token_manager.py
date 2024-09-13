@@ -3,7 +3,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 import json
-import pprint
 import os
 import pickle
 import logging
@@ -26,7 +25,7 @@ class TokenManager:
 
     def load_saved_token(self, name="uzum"):
         """Load saved token from a file."""
-        file_path = f"token/token_{name}.txt"
+        file_path = f"data/token/token_{name}.json"
         try:
             if os.path.exists(file_path):
                 with open(file_path, 'r') as file:
@@ -113,6 +112,13 @@ class TokenManager:
         chrome_options = uc.ChromeOptions()
         chrome_options.set_capability(
             "goog:loggingPrefs", {"performance": "ALL"})
+        # Added for Docker (needed?)
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+
+        # chrome_options.add_argument('--remote-debugging-port=9222')  # Use a fixed port
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1280,1024')
 
         token = None
         attempt_count = 0
@@ -161,11 +167,8 @@ class TokenManager:
                             if not os.path.exists(token_directory):
                                 os.makedirs(token_directory)
 
-                            out_name = os.path.join(
-                                token_directory, f"token_{subdomain}.txt")
-                            with open(out_name, "wt") as out:
-                                pprint.pprint(token, stream=out)
-
+                            with open(f"{token_directory}/token_{subdomain}.json", 'w', encoding='utf-8') as file:
+                                json.dump(token, file, ensure_ascii=False, indent=4)
                         break
                     else:
                         self.logger.info(
@@ -190,10 +193,9 @@ class TokenManager:
 
 
 if __name__ == "__main__":
-    token_manager = TokenManager()
-    token_manager.save_token = True
+    token_manager = TokenManager(save_token=True)
     token = token_manager.get_token_instance()
     if token is not None:
-        token_manager.logger.info(f"Token received:\n{token}")
+        token_manager.logger.info(f"Token received:\n{token[0:5]}...{token[-5:-1]}")
     else:
         token_manager.logger.info("Token not found!")

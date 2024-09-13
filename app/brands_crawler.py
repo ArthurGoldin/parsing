@@ -165,7 +165,7 @@ def get_all_main_categories() -> Optional[List[int]]:
     """
     rc = root_categories.load_last_saved_root_categories()
     if not rc:
-        rc = root_categories.get_root_categories(load_most_recent_if_failed=False)
+        rc = root_categories.get_root_categories()
     if rc:
         main_categories = [main_category['id'] for main_category in rc['payload']]
         return main_categories

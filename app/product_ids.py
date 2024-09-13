@@ -9,9 +9,10 @@ from typing import List, Tuple, Dict, Any
 from fake_useragent import UserAgent
 import sys
 import configparser
+
 from token_manager import TokenManager
 import graphql_query_generator
-from save_and_load_data import save_to_file, load_last_saved_csv, load_last_saved_json
+from save_and_load_data import save_to_file, load_last_saved_json
 
 logging.config.fileConfig('configs/logging.conf')
 logger = logging.getLogger()
@@ -67,7 +68,15 @@ def get_ids_from_json(json_data: Dict[str, Any]) -> List[int]:
     return product_ids
 
 
-def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: int = 100, request_retries: int = 10, backoff_factor: int = 1, main_url: str = "https://uzum.uz/ru", graphql_url: str = "https://graphql.uzum.uz/", save_category_ids: bool = False, **kwargs) -> Tuple[List[int], int]:
+def get_product_ids_by_category(category_id: int,
+                                amount: int = 0,
+                                page_limit: int = 100,
+                                request_retries: int = 10,
+                                backoff_factor: int = 1,
+                                main_url: str = "https://uzum.uz/ru",
+                                graphql_url: str = "https://graphql.uzum.uz/",
+                                save_data: bool = False,
+                                **kwargs) -> Tuple[List[int], int]:
     """
     Fetch product IDs by category with pagination and retries.
 
@@ -77,7 +86,7 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
         page_limit (int, optional): The limit of products per page.
         request_retries (int, optional): Number of retries for the request.
         backoff_factor (int, optional): Backoff factor for retries.
-        save_category_ids (bool, optional): Whether to save the fetched IDs to a CSV file.
+        save_data (bool, optional): Whether to save the fetched IDs to a CSV file.
 
     Returns:
         Tuple[List[int], int]: A tuple containing the list of product IDs and the status code.
@@ -257,7 +266,7 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
         data_list = list(set(data_list))
         logger.info(f"Total unique ids: {len(data_list)} in category {
                     category_id}, return status: {status}")
-        if save_category_ids:
+        if save_data:
             save_to_file(data_list, f'category_{category_id}_pr_ids', 'products_by_category', separate_folder=False)
     else:
         logger.warning(f"No items collected from category {category_id}, return status: {status}")
@@ -265,13 +274,19 @@ def get_product_ids_by_category(category_id: int, amount: int = 0, page_limit: i
     return data_list, status
 
 
-def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: str = "https://uzum.uz/ru", graphql_url: str = "https://graphql.uzum.uz/", save_fetched_data: bool = True, load_most_recent_if_failed: bool = True, **kwargs) -> List[int]:
+def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
+                                    main_url: str = "https://uzum.uz/ru",
+                                    graphql_url: str = "https://graphql.uzum.uz/",
+                                    save_data: bool = True,
+                                    load_most_recent_if_failed: bool = True,
+                                    sort_result: bool = True,
+                                    **kwargs) -> List[int]:
     """
     Fetch product IDs by categories and optionally save the fetched data.
 
     Args:
         categories (List[Dict[str, Any]]): List of categories to fetch product IDs from.
-        save_fetched_data (bool, optional): Whether to save the fetched data to a CSV file.
+        save_data (bool, optional): Whether to save the fetched data to a CSV file.
 
     Returns:
         List[int]: List of fetched product IDs.
@@ -286,38 +301,43 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]], main_url: 
     global auth_token
     auth_token = token_manager.get_token_instance()
 
-    if auth_token is not None:
-        p_ids = []
-        failed_categories = []
-        for category in categories:
-            category_ids, status = get_product_ids_by_category(category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url)
-            if len(category_ids) > 0:
-                p_ids.extend(category_ids)
-            if status != 200:
-                failed_categories.append({"id": category['id'], "productAmount": category['productAmount'], "status": status})
+    try:
+        if auth_token is not None:
+            p_ids = []
+            failed_categories = []
+            for category in categories:
+                category_ids, status = get_product_ids_by_category(category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url, save_data=save_data)
+                if len(category_ids) > 0:
+                    p_ids.extend(category_ids)
+                if status != 200:
+                    failed_categories.append({"id": category['id'], "productAmount": category['productAmount'], "status": status})
 
-        logger.info(f"Total {len(p_ids)} ids fetched.")
-        p_ids = list(set(p_ids))
-        logger.info(f"Total unique ids fetched: {len(p_ids)}")
-        logger.info(f'Total number of failed categories: {
-                    len(failed_categories)}')
+            logger.info(f"Total {len(p_ids)} ids fetched.")
+            p_ids = list(set(p_ids))
+            logger.info(f"Total unique ids fetched: {len(p_ids)}")
+            logger.info(f'Total number of failed categories: {
+                        len(failed_categories)}')
+            if sort_result:
+                p_ids = sorted(p_ids)
 
-        if save_fetched_data:
-            if p_ids:
-                save_to_file(p_ids, product_ids_dir, product_ids_dir, separate_folder=False)
+            if save_data:
+                if p_ids:
+                    save_to_file(p_ids, product_ids_dir, product_ids_dir, separate_folder=False)
 
-            if failed_categories:
-                save_to_file(failed_categories, 'failed_categories_ids', failed_categories_dir, separate_folder=False)
-                # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                #     json.dump(failed_categories, file,
-                #               ensure_ascii=False, indent=4)
+                if failed_categories:
+                    save_to_file(failed_categories, 'failed_categories_ids', failed_categories_dir, separate_folder=False)
+                    # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
+                    #     json.dump(failed_categories, file,
+                    #               ensure_ascii=False, indent=4)
 
-        if not p_ids and load_most_recent_if_failed:
-            logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")
-            p_ids = load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
-        return p_ids
-    else:
-        raise FileNotFoundError("Failed to get authorization token.")
+            if not p_ids and load_most_recent_if_failed:
+                logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")
+                p_ids = load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
+            return p_ids
+        else:
+            raise FileNotFoundError("Failed to get authorization token.")
+    except Exception as e:
+        logger.error(f"In 'fetch_product_ids_by_category': {e}")
 
 
 def are_integers(args):

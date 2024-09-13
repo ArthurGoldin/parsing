@@ -1,0 +1,360 @@
+{
+    "platform": "UZUM",
+    "data": [
+        {
+            "id": 12345678,
+            "title": "default data title",
+            "brand": "default data brand",
+            "category": {
+                "id": 15272,
+                "title": "default category title",
+                "productAmount": 0,
+                "parent": {
+                    "id": 12690,
+                    "title": "default parent1 title",
+                    "productAmount": 630,
+                    "parent": {
+                        "id": 10044,
+                        "title": "default parent2 title",
+                        "productAmount": 7741,
+                        "parent": {
+                            "id": 10020,
+                            "title": "default parent3 title",
+                            "productAmount": 24428,
+                            "parent": null
+                        }
+                    }
+                }
+            },
+            "rating": 4.9,
+            "reviewsAmount": 78,
+            "ordersAmount": 279,
+            "totalAvailableAmount": 21,
+            "url": "https://default",
+            "photo": "https://images.uzum.uz/cpq77l35qt1gj8dcbsgg/original.jpg",
+            "skuList": [
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -1,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986876,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358000,
+                    "availableAmount": 3,
+                    "fullPrice": 21000000,
+                    "purchasePrice": 15499000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -291,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986877,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358007,
+                    "availableAmount": 3,
+                    "fullPrice": 23000000,
+                    "purchasePrice": 16799000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -127,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986875,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3357996,
+                    "availableAmount": 0,
+                    "fullPrice": 18000000,
+                    "purchasePrice": 13999000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -291,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986876,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358006,
+                    "availableAmount": 0,
+                    "fullPrice": 21000000,
+                    "purchasePrice": 15499000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -5,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986877,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358004,
+                    "availableAmount": 2,
+                    "fullPrice": 23000000,
+                    "purchasePrice": 16799000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -127,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986876,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3357997,
+                    "availableAmount": 3,
+                    "fullPrice": 21000000,
+                    "purchasePrice": 15499000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -5,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986876,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358003,
+                    "availableAmount": 1,
+                    "fullPrice": 21000000,
+                    "purchasePrice": 15499000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -5,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986875,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358002,
+                    "availableAmount": 3,
+                    "fullPrice": 18000000,
+                    "purchasePrice": 13999000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -1,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986875,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3357999,
+                    "availableAmount": 0,
+                    "fullPrice": 18000000,
+                    "purchasePrice": 13999000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -127,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986877,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3357998,
+                    "availableAmount": 1,
+                    "fullPrice": 23000000,
+                    "purchasePrice": 16799000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -291,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986875,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358005,
+                    "availableAmount": 0,
+                    "fullPrice": 18000000,
+                    "purchasePrice": 13999000
+                },
+                {
+                    "characteristics": [
+                        {
+                            "id": -1,
+                            "title": "default characteristics title 1",
+                            "values": {
+                                "id": -1,
+                                "title": "default values title 1",
+                                "value": "default values value 1"
+                            }
+                        },
+                        {
+                            "id": 5986874,
+                            "title": "default characteristics title 2",
+                            "values": {
+                                "id": 5986877,
+                                "title": "default values title 2",
+                                "value": "default values value 2"
+                            }
+                        }
+                    ],
+                    "id": 3358001,
+                    "availableAmount": 5,
+                    "fullPrice": 23000000,
+                    "purchasePrice": 16799000
+                }
+            ],
+            "seller": [
+                {
+                    "id": 54321,
+                    "title": "default seller title",
+                    "rating": 4.9,
+                    "reviews": 108,
+                    "orders": 393
+                }
+            ]
+        }
+    ]
+}
