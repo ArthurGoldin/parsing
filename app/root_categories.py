@@ -1,8 +1,6 @@
 import http.client
-from operator import le
 import time
 import json
-from datetime import datetime
 import logging
 import logging.config
 import zlib

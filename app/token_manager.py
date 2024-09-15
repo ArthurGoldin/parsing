@@ -9,6 +9,10 @@ import logging
 import logging.config
 import time
 
+# Configure logging
+logging.config.fileConfig('configs/logging.conf')
+logger = logging.getLogger()
+
 
 class TokenManager:
     def __init__(self, url="https://uzum.uz/ru", max_retries=5, save_token=False, save_cookies=False, cookies_path="cookies/cookies.pkl"):
@@ -18,10 +22,10 @@ class TokenManager:
         self.save_cookies = save_cookies
         self.cookies_path = cookies_path
 
-        # Configure logging
-        logging_level = os.getenv('LOGGING_LEVEL', 'INFO').upper()
-        logging.config.fileConfig('configs/logging.conf')
-        self.logger = logging.getLogger()
+    def __repr__(self):
+        return (f"{self.__class__.__name__}(url='{self.url}', max_retries={self.max_retries}, "
+                f"save_token={self.save_token}, save_cookies={self.save_cookies}, "
+                f"cookies_path='{self.cookies_path}')")
 
     def load_saved_token(self, name="uzum"):
         """Load saved token from a file."""
@@ -30,14 +34,13 @@ class TokenManager:
             if os.path.exists(file_path):
                 with open(file_path, 'r') as file:
                     file_contents = file.read()
-                self.logger.info("Authorization token loaded successfully.")
+                logger.info("Authorization token loaded successfully.")
                 return file_contents
             else:
-                self.logger.info(
-                    "Authorization token does not exist, getting a new one...")
+                logger.info("Authorization token does not exist, getting a new one...")
                 return None
         except Exception as e:
-            self.logger.error(f"Error loading token: {e}")
+            logger.error(f"Error loading token: {e}")
             return None
 
     def save_cookies_with_path(self, driver, path):
@@ -45,9 +48,9 @@ class TokenManager:
         try:
             with open(path, 'wb') as file:
                 pickle.dump(driver.get_cookies(), file)
-            self.logger.info("Cookies saved successfully.")
+            logger.info("Cookies saved successfully.")
         except Exception as e:
-            self.logger.error(f"Error saving cookies: {e}")
+            logger.error(f"Error saving cookies: {e}")
 
     def load_cookies_with_path(self, driver, path):
         """Load cookies from a specified path."""
@@ -56,9 +59,9 @@ class TokenManager:
                 cookies = pickle.load(file)
                 for cookie in cookies:
                     driver.add_cookie(cookie)
-            self.logger.info("Cookies loaded successfully.")
+            logger.info("Cookies loaded successfully.")
         except Exception as e:
-            self.logger.error(f"Error loading cookies: {e}")
+            logger.error(f"Error loading cookies: {e}")
 
     def find_key(self, data, target="authorization"):
         """Recursively search for the target key in nested dictionaries and lists."""
@@ -85,13 +88,13 @@ class TokenManager:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "authorization")
             if token is not None and len(token) > 10:
-                self.logger.info("Authorization token received. Proceeding...")
+                logger.info("Authorization token received. Proceeding...")
                 return token
         for entry in logs:
             data = json.loads(entry["message"])["message"]
             token = self.find_key(data, "access_token")
             if token is not None and len(token) > 10:
-                self.logger.info("Authorization token received. Proceeding...")
+                logger.info("Authorization token received. Proceeding...")
                 return token
 
     def extract_subdomain(self, url):
@@ -151,10 +154,9 @@ class TokenManager:
                     if save_logs:
                         with open('data/network_logs.json', 'w', encoding='utf-8') as json_file:
                             json.dump(logs, json_file, ensure_ascii=False, indent=4)
-                            self.logger.info(
-                                "Network logs saved to: data/network_logs.json")
+                            logger.info("Network logs saved to: data/network_logs.json")
 
-                    self.logger.info(
+                    logger.info(
                         "Network logs received by chromedriver. Processing...")
                     token = self.process_browser_logs_to_fetch_authorization(
                         logs)
@@ -171,24 +173,21 @@ class TokenManager:
                                 json.dump(token, file, ensure_ascii=False, indent=4)
                         break
                     else:
-                        self.logger.info(
-                            "No authorization token received. Retrying...")
+                        logger.info("No authorization token received. Retrying...")
                 else:
-                    self.logger.warning(
-                        f"Logs were not captured in attempt number: {attempt_count}")
+                    logger.warning(f"Logs were not captured in attempt number: {attempt_count}")
                 attempt_count += 1
                 time.sleep(attempt_count)
         except Exception as e:
-            self.logger.error(f"Error in get_token_instance: {e}")
+            logger.error(f"Error in get_token_instance: {e}")
         finally:
             if driver is not None:
                 try:
                     driver.quit()
                 except Exception as e:
-                    self.logger.error(
-                        f"Error during driver quit in get_token_instance: {e}")
+                    logger.error(f"Error during driver quit in get_token_instance: {e}")
             if token is None:
-                self.logger.info(f"Couldn't retrieve an authorization token after {self.max_retries + 1} attempts.")
+                logger.info(f"Couldn't retrieve an authorization token after {self.max_retries + 1} attempts.")
         return token
 
 
@@ -196,6 +195,6 @@ if __name__ == "__main__":
     token_manager = TokenManager(save_token=True)
     token = token_manager.get_token_instance()
     if token is not None:
-        token_manager.logger.info(f"Token received:\n{token[0:5]}...{token[-5:-1]}")
+        logger.info(f"Token received:\n{token[0:5]}...{token[-5:-1]}")
     else:
-        token_manager.logger.info("Token not found!")
+        logger.info("Token not found!")

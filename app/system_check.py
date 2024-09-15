@@ -55,7 +55,7 @@ def run_system_check(host_name=""):
             res_stats["auth_token"] = "PASSED"
         logger.info(f'auth_token: {res_stats["auth_token"]}')
     except Exception as e:
-        res_stats["auth_token"] = "Error"
+        res_stats["auth_token"] = "ERROR"
         logger.error(f"Error in token_manager: {e}")
 
     try:
@@ -67,7 +67,7 @@ def run_system_check(host_name=""):
             res_stats["root_categories"] = "PASSED"
         logger.info(f'root_categories: {res_stats["root_categories"]}')
     except Exception as e:
-        res_stats["root_categories"] = "Error"
+        res_stats["root_categories"] = "ERROR"
         logger.error(f"Error in root_categories: {e}")
 
     try:
@@ -79,7 +79,7 @@ def run_system_check(host_name=""):
             res_stats["leaf_categories"] = "PASSED"
         logger.info(f'leaf_categories: {res_stats["leaf_categories"]}')
     except Exception as e:
-        res_stats["leaf_categories"] = "Error"
+        res_stats["leaf_categories"] = "ERROR"
         logger.error(f"Error in leaf_categories: {e}")
 
     try:
@@ -91,7 +91,7 @@ def run_system_check(host_name=""):
             res_stats["product_ids"] = "PASSED"
         logger.info(f'product_ids: {res_stats["product_ids"]}')
     except Exception as e:
-        res_stats["product_ids"] = "Error"
+        res_stats["product_ids"] = "ERROR"
         logger.error(f"Error in product_ids: {e}")
 
     try:
@@ -103,7 +103,7 @@ def run_system_check(host_name=""):
             res_stats["product_parser"] = "PASSED"
         logger.info(f'product_parser: {res_stats["product_parser"]}')
     except Exception as e:
-        res_stats["product_parser"] = "Error"
+        res_stats["product_parser"] = "ERROR"
         logger.error(f"Error in product_parser: {e}")
 
     try:
@@ -115,7 +115,7 @@ def run_system_check(host_name=""):
             res_stats["send_message"] = "PASSED"
         logger.info(f'send_message: {res_stats["send_message"]}')
     except Exception as e:
-        res_stats["send_message"] = "Error"
+        res_stats["send_message"] = "ERROR"
         logger.error(f"Error in send_message: {e}")
 
     end_time = time.time()

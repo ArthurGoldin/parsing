@@ -1,4 +1,4 @@
-# Marketplace parser for https://uzum.uz.
+# Marketplace parser for https://uzum.uz
 
 - If you want to run modules locally, cd to the app folder.
 
@@ -10,7 +10,7 @@
 
 - Run product_ids.py to fetch all product IDs for categories sent to the command as arguments (add category ID numbers as argument).
 
-## Docker instructions:
+## Docker instructions
 
 1. Build docker image:
    - `docker build -t uzum_parser .`
@@ -22,3 +22,5 @@
    - `docker run -v $(pwd)/app/data:/app/data -v $(pwd)/app/logs:/app/logs uzum_parser python3 -m <module_name>`
 4. RabbitMQ messaging to the baraka app:
    - `docker run --network barakadatauz_app-network -v $(pwd)/app/data:/app/data -v $(pwd)/app/logs:/app/logs uzum_parser python3 -m <module_name>`
+   - `or with specified container name`
+   - `docker run --name my_container_name --network barakadatauz_app-network -v $(pwd)/app/data:/app/data -v $(pwd)/app/logs:/app/logs uzum_parser python3 -m <module_name>`
