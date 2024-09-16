@@ -1,3 +1,5 @@
+![Marketplace logo](./images/logo.webp)
+
 # Marketplace Parser for [Uzum](https://uzum.uz)
 
 ## Running the Modules Locally
