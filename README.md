@@ -1,4 +1,4 @@
-![Marketplace logo](./images/logo.webp)
+![Marketplace logo](./images/logo.png)
 
 # Marketplace Parser for [Uzum](https://uzum.uz)
 
