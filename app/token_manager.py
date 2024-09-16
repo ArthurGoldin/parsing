@@ -10,8 +10,12 @@ import logging.config
 import time
 
 # Configure logging
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
+try:
+    logging.config.fileConfig('configs/logging.conf')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+finally:
+    logger = logging.getLogger()
 
 
 class TokenManager:

@@ -9,27 +9,78 @@ import argparse
 import root_categories
 import product_ids
 import product_parser
-from save_and_load_data import save_to_file
+from save_and_load_data import save_to_file, load_json
 import configparser
 from token_manager import TokenManager
 import send_data_to_db
 
 # Configure logging
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
+try:
+    logging.config.fileConfig('configs/logging.conf')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+finally:
+    logger = logging.getLogger()
 
 
 config = configparser.ConfigParser()
 config.read('configs/app.conf')
 
-data_dir = config.get('storage', 'data_directory')
-brands_dir = config.get('storage', 'brands_sub_dir')
-product_ids_dir = config.get('storage', 'product_ids_sub_dir')
-products_dir = config.get('storage', 'products_sub_dir')
-check_dir = config.get('storage', 'check_subdir')
-def_pr_name = config.get('storage', 'def_product_name')
+# Load Default Configuration from JSON
+default_config = load_json('configs/default_config.json')
 
-main_url = config.get('urls', 'main_url')
+
+def get_config(section: str, option: str) -> Any:
+    """
+    Retrieve configuration value with fallback to default if missing.
+    """
+    if config.has_option(section, option):
+        return config.get(section, option)
+    else:
+        default = default_config.get(section, {}).get(option)
+        if default is not None:
+            logger.warning(f"Missing configuration '{option}' in section '{section}'. Using default: '{default}'")
+            return default
+        else:
+            logger.error(f"Missing configuration '{option}' in section '{section}' and no default provided.")
+            sys.exit(1)
+
+
+def validate_config():
+    """
+    Validates that all required configuration sections and options are present.
+    Exits the program if validation fails.
+    """
+    required_sections = default_config.keys()
+    for section in required_sections:
+        if not config.has_section(section):
+            logger.warning(f"Missing required configuration section: '{section}'. Using defaults for this section.")
+        for option in default_config[section]:
+            if not config.has_option(section, option):
+                logger.warning(f"Missing configuration '{option}' in section '{section}'. Using default.")
+
+
+# Validate configurations
+validate_config()
+
+# Retrieve storage configurations
+data_dir = get_config('storage', 'data_directory')
+brands_dir = get_config('storage', 'brands_sub_dir')
+category_ids_dir = get_config('storage', 'category_ids_sub_dir')
+check_dir = get_config('storage', 'check_subdir')
+failed_categories_dir = get_config('storage', 'failed_categories_sub_dir')
+images_dir = get_config('storage', 'images_sub_dir')
+product_ids_dir = get_config('storage', 'product_ids_sub_dir')
+products_dir = get_config('storage', 'products_sub_dir')
+root_categories_dir = get_config('storage', 'root_categories_sub_dir')
+token_dir = get_config('storage', 'token_sub_dir')
+def_pr_name = get_config('storage', 'def_product_name')
+
+# Retrieve URLs configurations
+main_url = get_config('urls', 'main_url')
+graphql_url = get_config('urls', 'graphql_url')
+root_categories_req_url = get_config('urls', 'root_categories_req_url')
+product_api_url = get_config('urls', 'product_api_url')
 
 
 def run_system_check(host_name=""):
@@ -134,6 +185,12 @@ if __name__ == "__main__":
     val = args.host_name
 
     try:
-        run_system_check(val)
+        results = run_system_check(val)
+        # Determine exit code based on results
+        if all(status == "PASSED" for status in results.values()):
+            sys.exit(0)
+        else:
+            sys.exit(1)
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->system_check: {e}")
+        sys.exit(1)

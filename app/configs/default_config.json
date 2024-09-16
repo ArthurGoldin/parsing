@@ -1,0 +1,21 @@
+{
+  "storage": {
+    "data_directory": "data",
+    "brands_sub_dir": "brands",
+    "category_ids_sub_dir": "category_ids",
+    "check_subdir": "system_check",
+    "failed_categories_sub_dir": "failed_categories",
+    "images_sub_dir": "images",
+    "product_ids_sub_dir": "product_ids",
+    "products_sub_dir": "products",
+    "root_categories_sub_dir": "root_categories",
+    "token_sub_dir": "token",
+    "def_product_name": "default_prod.json"
+  },
+  "urls": {
+    "main_url": "https://uzum.uz/ru",
+    "graphql_url": "https://graphql.uzum.uz/",
+    "root_categories_req_url": "https://api.uzum.uz/api/main/root-categories?eco=false",
+    "product_api_url": "https://api.uzum.uz/api/v2/product/"
+  }
+}

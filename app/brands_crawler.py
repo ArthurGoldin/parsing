@@ -13,8 +13,12 @@ import configparser
 from save_and_load_data import save_to_file
 
 # Configure logging
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
+try:
+    logging.config.fileConfig('configs/logging.conf')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+finally:
+    logger = logging.getLogger()
 
 config = configparser.ConfigParser()
 config.read('configs/app.conf')

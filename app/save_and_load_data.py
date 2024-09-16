@@ -9,36 +9,13 @@ import json
 import csv
 import glob
 
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
-
-
-# def save_to_file(file: List[Any], file_name: str, sub_dir: str = "", file_type: str = "", add_date_time: bool = False, data_dir: str = 'data', separate_folder: bool = True) -> None:
-#     """
-#     Save the given data to a CSV/JSON file.
-
-#     Args:
-#         file (List[Any]): Data to be saved.
-#         file_name (str): Name of the file.
-#         sub_dir (str, optional): Sub-directory within the data directory.
-#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
-#     """
-#     dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%d%m%Y") if separate_folder else ""}"
-#     if not os.path.exists(dir_path):
-#         os.makedirs(dir_path)
-#     orig_file_name = file_name
-#     if add_date_time:
-#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
-#     if file_type == "CSV" or file_type == "csv" or file_type == "":
-#         with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-#             writer = csv.writer(write_file)
-#             writer.writerow(file['data'] if 'data' in file else file)
-#             logger.info(f"{orig_file_name}.csv saved to {dir_path}")
-#     if file_type == "JSON" or file_type == "json" or file_type == "":
-#         with open(f"{dir_path}/{file_name}.json", 'w', encoding='utf-8') as write_file:
-#             json.dump(file, write_file, ensure_ascii=False, indent=4)
-#             logger.info(f"{orig_file_name}.json saved to {dir_path}")
+# Configure logging
+try:
+    logging.config.fileConfig('configs/logging.conf')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+finally:
+    logger = logging.getLogger()
 
 
 def save_to_file(file: Union[List[Any], Dict[str, Any]],
@@ -202,8 +179,14 @@ def load_json(file_path: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: The JSON data.
     """
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return json.load(file)
+    if not os.path.exists(file_path):
+        logger.error(f"File '{file_path}' not found.")
+    try:
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing JSON file '{file_path}': {e}")
+    return None
 
 
 def load_last_saved_root_categories(directory: str = "data/root_categories") -> Dict[str, Any]:

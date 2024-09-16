@@ -14,8 +14,13 @@ from token_manager import TokenManager
 import graphql_query_generator
 from save_and_load_data import save_to_file, load_last_saved_json
 
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
+# Configure logging
+try:
+    logging.config.fileConfig('configs/logging.conf')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+finally:
+    logger = logging.getLogger()
 
 config = configparser.ConfigParser()
 config.read('configs/app.conf')
