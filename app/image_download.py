@@ -10,9 +10,14 @@ import logging
 #     if isinstance(handler, logging.StreamHandler):  # Ensure we only modify the console handler
 #         handler.setLevel(logging.WARNING)  # Set console output to WARNING and higher for this module
 
-logging.basicConfig(level=logging.WARNING,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger()
+# Configure logging
+try:
+    logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('image_download')
+except Exception as e:
+    logging.basicConfig(level=logging.WARNING)
+    logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
 def download_image(

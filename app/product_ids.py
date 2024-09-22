@@ -1,26 +1,29 @@
-import http.client
-import time
-import json
-import logging
-import logging.config
-import zlib
-import brotli
-from typing import List, Tuple, Dict, Any
-from fake_useragent import UserAgent
-import sys
-import configparser
-
-from token_manager import TokenManager
-import graphql_query_generator
+from typing import List, Dict, Any
+import argparse
 from save_and_load_data import save_to_file, load_last_saved_json
+import graphql_query_generator
+from token_manager import TokenManager
+import configparser
+import sys
+from fake_useragent import UserAgent
+from typing import List, Tuple, Dict, Any
+import brotli
+import zlib
+import logging.config
+import logging
+import json
+import time
+import http.client
+import base64
 
 # Configure logging
 try:
     logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
-finally:
     logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 config = configparser.ConfigParser()
 config.read('configs/app.conf')
@@ -28,9 +31,6 @@ config.read('configs/app.conf')
 data_dir = config.get('storage', 'data_directory')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 failed_categories_dir = config.get('storage', 'failed_categories_sub_dir')
-
-token_manager = None
-auth_token = None
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -59,7 +59,7 @@ def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
 
 def get_ids_from_json(json_data: Dict[str, Any]) -> List[int]:
     """
-    Extract product IDs from the given JSON data.
+    Extract product IDs from the given JSON data with thorough field existence checks.
 
     Args:
         json_data (Dict[str, Any]): The JSON data.
@@ -67,13 +67,61 @@ def get_ids_from_json(json_data: Dict[str, Any]) -> List[int]:
     Returns:
         List[int]: List of product IDs.
     """
-    items = json_data.get("data", {}).get("makeSearch", {}).get("items", [])
-    product_ids = [item.get("catalogCard", {}).get(
-        "productId") for item in items if "catalogCard" in item and "productId" in item["catalogCard"]]
+    product_ids = []
+
+    data = json_data.get("data")
+    if data is None:
+        logger.error("Missing 'data' field in JSON response.")
+        return product_ids
+
+    make_search = data.get("makeSearch")
+    if make_search is None:
+        logger.error("Missing 'makeSearch' field in 'data'.")
+        return product_ids  #
+
+    items = make_search.get("items")
+    if items is None:
+        logger.error("Missing 'items' field in 'makeSearch'.")
+        return product_ids
+    if not isinstance(items, list):
+        logger.error(f"'items' field is not a list. Received type: {type(items)}")
+        return product_ids
+
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            logger.warning(f"Item at index {index} is not a dictionary. Skipping.")
+            continue
+
+        catalog_card = item.get("catalogCard")
+        if catalog_card is None:
+            logger.warning(f"Missing 'catalogCard' in item at index {index}. Skipping.")
+            continue
+
+        if not isinstance(catalog_card, dict):
+            logger.warning(f"'catalogCard' in item at index {index} is not a dictionary. Skipping.")
+            continue
+
+        product_id = catalog_card.get("productId")
+        if product_id is None:
+            logger.warning(f"Missing 'productId' in 'catalogCard' at index {index}. Skipping.")
+            continue
+
+        if not isinstance(product_id, int):
+            logger.warning(f"'productId' in 'catalogCard' at index {index} is not an integer. Skipping.")
+            continue
+
+        product_ids.append(product_id)
+
+    if not product_ids:
+        logger.info("No product IDs extracted from JSON data.")
+    else:
+        logger.debug(f"Extracted {len(product_ids)} product IDs.")
+
     return product_ids
 
 
-def get_product_ids_by_category(category_id: int,
+def get_product_ids_by_category(token_manager: TokenManager,
+                                category_id: int,
                                 amount: int = 0,
                                 page_limit: int = 100,
                                 request_retries: int = 10,
@@ -96,8 +144,7 @@ def get_product_ids_by_category(category_id: int,
     Returns:
         Tuple[List[int], int]: A tuple containing the list of product IDs and the status code.
     """
-    global auth_token
-    global token_manager
+
     if not token_manager:
         logger.info("Initiating tokenManager in 'get_product_ids_by_category'.")
         token_manager = TokenManager(
@@ -109,6 +156,8 @@ def get_product_ids_by_category(category_id: int,
         auth_token = token_manager.get_token_instance()
         if auth_token is None:
             raise FileNotFoundError("Failed to get authorization token.")
+    else:
+        auth_token = token_manager.token
 
     ua = UserAgent()
     headers = {
@@ -124,7 +173,7 @@ def get_product_ids_by_category(category_id: int,
         'Referer': f'{main_url}',
         'sec-fetch-site': 'same-site',
         'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
-        'User-Agent': ua.random if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'User-Agent': ua.random,
         'x-context': 'null',
         'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7',
         'Connection': 'keep-alive'
@@ -137,6 +186,7 @@ def get_product_ids_by_category(category_id: int,
     query_sort_types = ['BY_RELEVANCE_DESC', 'BY_RELEVANCE_ASC',
                         'BY_RATING_DESC', 'BY_RATING_ASC', 'BY_ORDERS_NUMBER_DESC', 'BY_ORDERS_NUMBER_ASC', 'BY_DATE_ADDED_ASC', 'BY_DATE_ADDED_DESC', 'BY_PRICE_ASC', 'BY_PRICE_DESC']
     query_sort_ind = 0
+    OFFSET_LIMIT = 10000
     items_offset = 0
     data_list = []
     prev_data = []
@@ -199,6 +249,7 @@ def get_product_ids_by_category(category_id: int,
                                     headers['Authorization'] = f'Bearer {
                                         auth_token}'
                             request_attempts += 1
+
                             conn = http.client.HTTPSConnection(host)
                             continue
 
@@ -221,14 +272,14 @@ def get_product_ids_by_category(category_id: int,
                         done = True
 
                     # If reached the offset limit, try other types of query sorting to extract maximum data
-                    if items_offset >= 10000:
+                    if items_offset >= OFFSET_LIMIT:
                         if query_sort_ind < len(query_sort_types) - 1:
                             items_offset = 0
                             query_sort_ind += 1
                             logger.info(f"Reached the API offset limit of 10,000. Switching to sort type {
                                         query_sort_types[query_sort_ind]}")
                             # add 10000 to prevent stopping (the amount is now irrelevant)
-                            amount += 10000
+                            amount += OFFSET_LIMIT
                         else:
                             done = True
 
@@ -296,14 +347,12 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
     Returns:
         List[int]: List of fetched product IDs.
     """
-    global token_manager
     token_manager = TokenManager(
         url=main_url,
         max_retries=kwargs.get('token_retries', 5),
         save_token=kwargs.get('save_token', False),
         save_cookies=False
     )
-    global auth_token
     auth_token = token_manager.get_token_instance()
 
     try:
@@ -311,7 +360,7 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
             p_ids = []
             failed_categories = []
             for category in categories:
-                category_ids, status = get_product_ids_by_category(category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url, save_data=save_data)
+                category_ids, status = get_product_ids_by_category(token_manager, category_id=category['id'], amount=category['productAmount'], main_url=main_url, graphql_url=graphql_url, save_data=save_data)
                 if len(category_ids) > 0:
                     p_ids.extend(category_ids)
                 if status != 200:
@@ -345,81 +394,30 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
         logger.error(f"In 'fetch_product_ids_by_category': {e}")
 
 
-def are_integers(args):
-    for arg in args:
-        try:
-            int(arg)
-        except ValueError:
-            return False
-    return True
+def main():
+    parser = argparse.ArgumentParser(description='Fetch product IDs by category.')
+    parser.add_argument('categories', metavar='CATEGORY_ID', type=int, nargs='+',
+                        help='Category IDs to fetch product IDs from.')
+    parser.add_argument('-s', '--save', action='store_true',
+                        help='Save fetched product IDs to file.')
+    parser.add_argument('-l', '--load', action='store_true',
+                        help='Load most recent product IDs if fetching fails.')
+    parser.add_argument('-o', '--sort', action='store_true',
+                        help='Sort the resulting product IDs.')
+    args = parser.parse_args()
+
+    categories = [{'id': cid, 'productAmount': 0} for cid in args.categories]
+    logger.info("Starting to fetch product IDs for the input categories...")
+    try:
+        fetch_product_ids_by_categories(
+            categories=categories,
+            save_data=args.save,
+            load_most_recent_if_failed=args.load,
+            sort_result=args.sort
+        )
+    except Exception as e:
+        logger.error(f"In {__file__}->main: {e}")
 
 
 if __name__ == "__main__":
-    arguments = sys.argv[1:]
-    if are_integers(arguments):
-        categories = []
-        for category in arguments:
-            categories.append({'id': int(category), 'productAmount': 0})
-        logger.info("Starting to fetch product IDs for the input categories...")
-        try:
-            fetch_product_ids_by_categories(categories)
-        except Exception as e:
-            logger.error(f"In {sys.argv[0]}->main: {e}")
-    else:
-        logger.error("Wrong input arguments.")
-
-
-# def save_csv(file: List[Any], file_name: str, sub_dir: str = "", add_date_time: bool = True) -> None:
-#     """
-#     Save the given data to a CSV file.
-
-#     Args:
-#         file (List[Any]): Data to be saved.
-#         file_name (str): Name of the file.
-#         sub_dir (str, optional): Sub-directory within the data directory.
-#         add_date_time (bool, optional): Whether to append the current datetime to the file name.
-#     """
-#     dir_path = f"{data_dir}/{sub_dir}"
-#     if not os.path.exists(dir_path):
-#         os.makedirs(dir_path)
-
-#     orig_file_name = file_name
-#     if add_date_time:
-#         file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
-#     with open(f'{dir_path}/{file_name}.csv', 'w', newline='') as write_file:
-#         writer = csv.writer(write_file)
-#         writer.writerow(file)
-#         logger.info(f"{orig_file_name} saved to a .csv file in {
-#                     data_dir}/{sub_dir}")
-
-
-# def load_last_saved_csv(directory: str, name: str) -> List[int]:
-#     """
-#     Load the last saved CSV file from the specified directory.
-
-#     Args:
-#         directory (str): The directory containing the CSV files.
-#         name (str): The base name of the CSV files.
-
-#     Returns:
-#         List[int]: List of integers read from the CSV file.
-#     """
-#     try:
-#         list_of_files = glob.glob(os.path.join(directory, f'{name}_*.csv'))
-#         if not list_of_files:
-#             raise FileNotFoundError(
-#                 "No csv files found in the directory/category.")
-
-#         latest_file = max(list_of_files, key=os.path.getctime)
-
-#         with open(latest_file, newline='') as csvfile:
-#             reader = csv.reader(csvfile)
-#             for row in reader:
-#                 int_list = [int(item) for item in row]
-#         logger.info(f"Loaded most recent {
-#                     name}. Total items: {len(int_list)}")
-#         return int_list
-#     except Exception as e:
-#         logging.error(f'Failed to load the last saved csv file: {e}')
-#         return []
+    main()

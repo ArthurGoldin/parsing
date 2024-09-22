@@ -17,10 +17,11 @@ import send_data_to_db
 # Configure logging
 try:
     logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('system_check')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
-finally:
     logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
 config = configparser.ConfigParser()

@@ -3,8 +3,13 @@ import logging
 import logging.config
 
 # Configure logging
-logging.config.fileConfig('configs/logging.conf')
-logger = logging.getLogger()
+try:
+    logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('main')
+except Exception as e:
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
 def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, sort: str = "BY_RELEVANCE_DESC", showAdultContent: str = "TRUE", filters: list = [], correctQuery: bool = False, getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:

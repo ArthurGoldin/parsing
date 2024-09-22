@@ -12,10 +12,11 @@ import time
 # Configure logging
 try:
     logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
-finally:
     logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
 class TokenManager:
@@ -25,6 +26,7 @@ class TokenManager:
         self.save_token = save_token
         self.save_cookies = save_cookies
         self.cookies_path = cookies_path
+        self.token = ""
 
     def __repr__(self):
         return (f"{self.__class__.__name__}(url='{self.url}', max_retries={self.max_retries}, "
@@ -192,6 +194,7 @@ class TokenManager:
                     logger.error(f"Error during driver quit in get_token_instance: {e}")
             if token is None:
                 logger.info(f"Couldn't retrieve an authorization token after {self.max_retries + 1} attempts.")
+        self.token = token
         return token
 
 

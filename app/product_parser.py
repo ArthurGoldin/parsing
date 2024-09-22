@@ -15,15 +15,18 @@ from save_and_load_data import load_last_saved_json, save_to_file
 from image_download import download_image
 from send_data_to_db import send_message
 
+import base64
+
 from token_manager import TokenManager
 
 # Configure logging
 try:
     logging.config.fileConfig('configs/logging.conf')
+    logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
-finally:
     logger = logging.getLogger()
+    logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 config = configparser.ConfigParser()
 config.read('configs/app.conf')
@@ -33,10 +36,6 @@ brands_dir = config.get('storage', 'brands_sub_dir')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 products_dir = config.get('storage', 'products_sub_dir')
 images_dir = config.get('storage', 'images_sub_dir')
-
-token_manager = None
-
-brands_by_category = None
 
 
 def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
@@ -63,7 +62,7 @@ def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
         return response_data
 
 
-def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru") -> Tuple[Dict[str, Any], Dict[str, str] | str]:
+def parse_product(json_data: Dict[str, Any], brands_by_category, main_url: str = "https://uzum.uz/ru") -> Tuple[Dict[str, Any], Dict[str, str] | str]:
     """
     Parse product information from the given JSON data.
 
@@ -112,7 +111,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
         else:
             brand = find_keywords_in_title(payload.get('title', None), brands_by_category[f'{find_oldest_ancestor(payload)}']) if brands_by_category else ''
 
-        image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None), payload.get('id', None), f'{data_dir}/{images_dir}')
+        # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None), payload.get('id', None), f'{data_dir}/{images_dir}')
 
         result = {
             'id': payload.get('id', None),
@@ -155,8 +154,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
         error_messages = {}
         for key, value in result.items():
             if value is None:
-                error_messages[key] = f"{
-                    key} is missing or null in the JSON file."
+                error_messages[key] = f"{key} is missing or null in the JSON file."
 
         if error_messages:
             return None, error_messages
@@ -168,7 +166,7 @@ def parse_product(json_data: Dict[str, Any], main_url: str = "https://uzum.uz/ru
 
 
 def fetch_products(p_ids: List[int],
-                   request_retries: int = 10,
+                   request_retries: int = 15,
                    backoff_factor: int = 1,
                    product_api_url: str = "https://api.uzum.uz/api/v2/product/",
                    main_url: str = "https://uzum.uz/ru",
@@ -185,7 +183,6 @@ def fetch_products(p_ids: List[int],
     Returns:
         Tuple[List[Dict[str, Any]], List[int]]: A tuple containing the list of product details and the list of failed product IDs.
     """
-    global brands_by_category
     brands_by_category = load_last_saved_json(f'{data_dir}/{brands_dir}')
 
     host = product_api_url.split("//")[1].split('/')[0]
@@ -218,7 +215,7 @@ def fetch_products(p_ids: List[int],
         'Referer': f'{main_url}',
         'Sec-Fetch-Site': 'same-site',
         'Sentry-Trace': '7045c04a13404cd1b3abb6633c60702f-b0db85c265fc14ff-0',
-        'User-Agent': ua.random if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'User-Agent': ua.random,  # if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'X-Iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7',
         'Connection': 'keep-alive'
     }
@@ -230,7 +227,7 @@ def fetch_products(p_ids: List[int],
     ind = 0
 
     def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
-        logger.info(f"Server rejected. Attempt number {request_attempts}")
+        logger.warning(f"Server rejected. Attempt number {request_attempts}")
         wait_time = backoff_factor * (2 ** request_attempts)
         logger.info(f"Retrying in {wait_time} seconds...")
         time.sleep(wait_time)
@@ -239,6 +236,22 @@ def fetch_products(p_ids: List[int],
 
     try:
         conn = http.client.HTTPSConnection(host)
+
+        # proxy = "user210707:6qml5v@193.28.183.102:6176"
+        # auth_part, proxy_address = proxy.split("@")
+        # username, password = auth_part.split(":")
+        # proxy_host, proxy_port = proxy_address.split(":")
+        # proxy_port = int(proxy_port)
+        # # Encode credentials for Proxy-Authorization header
+        # credentials = f"{username}:{password}"
+        # encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+        # # Set up a connection to the proxy
+        # conn = http.client.HTTPSConnection(proxy_host, proxy_port)
+
+        # # Set up a tunnel to the target host using the CONNECT method
+        # conn.set_tunnel(host, headers={
+        #     'Proxy-Authorization': f'Basic {encoded_credentials}'
+        # })
 
         # Store data main structure
         data_to_save = {
@@ -256,6 +269,8 @@ def fetch_products(p_ids: List[int],
                 product_id = p_ids[ind]
                 endpoint = f'{endpoint_base}{product_id}'
                 headers['path'] = f'{endpoint}'
+
+                headers['User-Agent'] = ua.random
 
                 conn.request("GET", endpoint, headers=headers)
                 response = conn.getresponse()
@@ -279,28 +294,44 @@ def fetch_products(p_ids: List[int],
                             error.get('message', 'Unknown error') for error in json_data['errors']]
                         error_429 = False
                         for error_message in error_messages:
-                            logger.error(f'Product API Error: {
-                                error_message}')
+                            logger.error(f'Product API Error: {error_message}')
                             if '429' in error_message:
                                 error_429 = True
 
                         if error_429:
-                            status = 429
+                            logger.warning("429 (JSON errors): Blocked by the server due to too many requests.")
                             conn.close()
                             wait_with_backoff(
                                 request_attempts, backoff_factor)
                             if request_attempts == 0:
-                                headers['User-Agent'] = ua.random
                                 new_token = token_manager.get_token_instance()
                                 if new_token is not None:
                                     auth_token = new_token
                                     headers['Authorization'] = f'Bearer {
                                         auth_token}'
                             request_attempts += 1
+                            # headers['User-Agent'] = ua.random
                             conn = http.client.HTTPSConnection(host)
+
+                            # proxy = "user210707:6qml5v@193.28.183.102:6176"
+                            # auth_part, proxy_address = proxy.split("@")
+                            # username, password = auth_part.split(":")
+                            # proxy_host, proxy_port = proxy_address.split(":")
+                            # proxy_port = int(proxy_port)
+                            # # Encode credentials for Proxy-Authorization header
+                            # credentials = f"{username}:{password}"
+                            # encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+                            # # Set up a connection to the proxy
+                            # conn = http.client.HTTPSConnection(proxy_host, proxy_port)
+
+                            # # Set up a tunnel to the target host using the CONNECT method
+                            # conn.set_tunnel(host, headers={
+                            #     'Proxy-Authorization': f'Basic {encoded_credentials}'
+                            # })
+
                             continue
 
-                    data, errors = parse_product(json_data)
+                    data, errors = parse_product(json_data, brands_by_category)
                     if data:
                         data_list.append(data)
                         data_to_send = {
@@ -309,18 +340,19 @@ def fetch_products(p_ids: List[int],
                         }
                         # send to RabbitMQ
                         try:
-                            send_message(data_to_send)
+                            send_message(data_to_send, host_name="localhost")
                         except Exception as e:
                             logger.error(f'Sending RabbitMQ message to broker failed:{e}')
 
                     else:
-                        logger.error(
-                            f'Could not parse data from product ID {product_id}.')
+                        logger.error(f'Could not parse data from product ID {product_id}.')
                         logger.error(f'Errors found: {errors}')
                         failed_product_ids.append(product_id)
 
                     request_attempts = 0
                     ind += 1
+                    if ind % 15 == 0:
+                        time.sleep(2.5)
                     if ind % 100 == 0:
                         if data_list and save_data:
                             data_to_save = {
@@ -330,22 +362,65 @@ def fetch_products(p_ids: List[int],
                         total_data_list.extend(data_list)
                         data_list = []
                         logger.info(f'Processed {ind} products.')
+                        time.sleep(1)
 
                 elif response.status == 401:
-                    logger.info(
-                        f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
+                    logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
                     conn.close()
                     wait_with_backoff(request_attempts, backoff_factor)
                     auth_token = token_manager.get_token_instance()
                     headers['Authorization'] = f'Bearer {auth_token}'
                     request_attempts += 1
+
+                    # headers['User-Agent'] = ua.random
                     conn = http.client.HTTPSConnection(host)
+
+                    # proxy = "user210707:6qml5v@193.28.183.102:6176"
+                    # auth_part, proxy_address = proxy.split("@")
+                    # username, password = auth_part.split(":")
+                    # proxy_host, proxy_port = proxy_address.split(":")
+                    # proxy_port = int(proxy_port)
+                    # # Encode credentials for Proxy-Authorization header
+                    # credentials = f"{username}:{password}"
+                    # encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+                    # # Set up a connection to the proxy
+                    # conn = http.client.HTTPSConnection(proxy_host, proxy_port)
+
+                    # # Set up a tunnel to the target host using the CONNECT method
+                    # conn.set_tunnel(host, headers={
+                    #     'Proxy-Authorization': f'Basic {encoded_credentials}'
+                    # })
+
                 elif response.status == 429:
-                    logger.info(
-                        "429: Blocked by a server due to too many requests.")
-                    headers['User-Agent'] = ua.random
-                    wait_with_backoff(request_attempts, backoff_factor)
+                    retry_time = int(response.headers.get("Retry-After", 1))
+                    conn.close()
+                    logger.warning("429: Blocked by the server due to too many requests.")
+                    if retry_time > 0:
+                        logger.warning(f"Received waiting time: {retry_time} seconds")
+                        time.sleep(retry_time)
+                    else:
+                        wait_with_backoff(request_attempts, backoff_factor)
                     request_attempts += 1
+
+                    # headers['User-Agent'] = ua.random
+                    conn = http.client.HTTPSConnection(host)
+
+                    # proxy = "user210707:6qml5v@193.28.183.102:6176"
+                    # auth_part, proxy_address = proxy.split("@")
+                    # username, password = auth_part.split(":")
+                    # proxy_host, proxy_port = proxy_address.split(":")
+                    # proxy_port = int(proxy_port)
+                    # # Encode credentials for Proxy-Authorization header
+                    # credentials = f"{username}:{password}"
+                    # encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+                    # # Set up a connection to the proxy
+                    # conn = http.client.HTTPSConnection(proxy_host, proxy_port)
+
+                    # # Set up a tunnel to the target host using the CONNECT method
+                    # conn.set_tunnel(host, headers={
+                    #     'Proxy-Authorization': f'Basic {encoded_credentials}'
+                    # })
+
                     continue
                 else:
                     raise ValueError(f"Bad response status on a product API: {
@@ -383,15 +458,6 @@ def fetch_products(p_ids: List[int],
     return total_data_list, failed_product_ids
 
 
-def are_integers(args):
-    for arg in args:
-        try:
-            int(arg)
-        except ValueError:
-            return False
-    return True
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Processing of product data.')
     parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
@@ -410,7 +476,7 @@ if __name__ == "__main__":
             logger.info(
                 f"Loading the last saved IDs from: {data_dir}/product_ids")
             product_list = load_last_saved_json(directory=f'{data_dir}/{product_ids_dir}')
-    elif args.product_ids and are_integers(args.product_ids):
+    elif args.product_ids:
         logger.info(f'Parsing product with ID: {args.product_ids}')
         product_list = args.product_ids
     else:
