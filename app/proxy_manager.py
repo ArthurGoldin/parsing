@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError
+# from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import threading
 import atexit
 
@@ -30,8 +31,21 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
+
+# def job_listener(event):
+#     if event.exception:
+#         logger.error(f"The job {event.job_id} failed with exception: {event.exception}")
+#     else:
+#         logger.debug(f"The job {event.job_id} executed successfully.")
+
+
 # Register a shutdown hook
 atexit.register(lambda: scheduler.shutdown())
+
+
+class ProxyUnavailableError(Exception):
+    """Exception raised when no proxies are available within the specified timeout."""
+    pass
 
 
 class ProxyStatus(Enum):
@@ -40,6 +54,7 @@ class ProxyStatus(Enum):
 
     Attributes:
         ACTIVE (str): Indicates the proxy is active.
+        EXPIRED (str) = Indicates the proxy is expired
         NOT_ACTIVE (str): Indicates the proxy is not active.
         PAUSED (str): Indicates the proxy is paused temporarily.
         SLEEPING (str): Indicates the proxy is sleeping temporarily.
@@ -64,7 +79,7 @@ class ProxyStatus(Enum):
         Returns:
             ProxyStatus: The UNDEFINED status.
         """
-        logger.warning(f"invalid status '{value}' for proxy, setting status to UNDEFINED")
+        logger.warning(f"Invalid status '{value}' for proxy, setting status to UNDEFINED")
         return cls.UNDEFINED
 
 
@@ -133,9 +148,9 @@ class Proxy:
             if isinstance(status, ProxyStatus):
                 prev_status = self.status
                 self.status = status
-                logger.debug(f"status of {self.ip} changed from {prev_status} to {status.value}")
+                logger.debug(f"Status of {self.ip} changed from {prev_status} to {status.value}")
                 return True
-            logger.error(f"wrong status value")
+            logger.error(f"Wrong status value")
             return False
 
     def set_temporary_status(self, temp_status: ProxyStatus, duration: int, manager_reference) -> bool:
@@ -159,14 +174,14 @@ class Proxy:
             if self._job_id:
                 try:
                     scheduler.remove_job(self._job_id)
-                    logger.debug(f"existing job {self._job_id} for {self.ip} removed")
+                    logger.debug(f"Existing job {self._job_id} for {self.ip} removed")
                 except JobLookupError:
-                    logger.warning(f"job {self._job_id} not found for {self.ip}")
+                    logger.warning(f"Job {self._job_id} not found for {self.ip}")
                 self._job_id = None
 
             # Set the temporary status
             self.status = temp_status
-            logger.debug(f"status of {self.ip} set to {temp_status.value} for {duration} seconds")
+            logger.debug(f"Status of {self.ip} set to {temp_status.value} for {duration} seconds")
 
             # Calculate the run_time as a datetime object
             run_time = datetime.now() + timedelta(seconds=duration)
@@ -180,7 +195,7 @@ class Proxy:
                 id=f"revert_status_{self.ip}_{int(run_time.timestamp())}"
             )
             self._job_id = job.id
-            logger.debug(f"scheduled job {self._job_id} to revert status of {self.ip}")
+            logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
 
             return True
 
@@ -191,10 +206,10 @@ class Proxy:
         with self._status_lock:
             if not self.is_expired():
                 self.status = ProxyStatus.ACTIVE
-                logger.debug(f"status of {self.ip} reverted to ACTIVE after timeout")
+                logger.debug(f"Status of {self.ip} reverted to ACTIVE after timeout")
             else:
                 self.set_status(ProxyStatus.EXPIRED)
-                logger.debug(f"status of {self.ip} changed to {self.status.value} as it is expired")
+                logger.debug(f"Status of {self.ip} changed to {self.status.value} as it is expired")
             self._job_id = None  # Clear the job ID since it's executed
 
     def __repr__(self):
@@ -222,6 +237,7 @@ class ProxyManager:
         """
         self.proxies: List[Proxy] = []
         self._manager_lock = threading.Lock()  # To handle concurrent access
+        self.proxy_available = threading.Condition()
 
     @classmethod
     def from_proxies(cls, proxies: List[Proxy]):
@@ -230,7 +246,7 @@ class ProxyManager:
         """
         manager = cls()
         manager.proxies = proxies.copy()
-        logger.info(f"PROXY_MANAGER:: Initialized with {len(proxies)} proxies")
+        logger.info(f"Initialized with {len(proxies)} proxies")
         return manager
 
     @classmethod
@@ -240,7 +256,7 @@ class ProxyManager:
         """
         manager = cls()
         manager.process_proxies(json_data)
-        logger.info(f"PROXY_MANAGER:: Initialized from JSON with {len(manager.proxies)} proxies")
+        logger.info(f"Initialized from JSON with {len(manager.proxies)} proxies")
         return manager
 
     @classmethod
@@ -251,13 +267,13 @@ class ProxyManager:
         try:
             with open(file_path, 'r') as file:
                 json_data = file.read()
-            logger.info(f"PROXY_MANAGER:: Read JSON data from {file_path}")
+            logger.info(f"Read JSON data from {file_path}")
             return cls.from_json(json_data)
         except FileNotFoundError:
-            logger.error(f"PROXY_MANAGER:: JSON file not found at {file_path}")
+            logger.error(f"JSON file not found at {file_path}")
             return cls()
         except Exception as e:
-            logger.error(f"PROXY_MANAGER:: Error reading JSON file {file_path}: {e}")
+            logger.error(f"Error reading JSON file {file_path}: {e}")
             return cls()
 
     @classmethod
@@ -271,9 +287,9 @@ class ProxyManager:
             response.raise_for_status()
             json_data = response.text
             manager.process_proxies(json_data)
-            logger.info(f"PROXY_MANAGER:: Initialized from API with {len(manager.proxies)} proxies")
+            logger.info(f"Initialized from API with {len(manager.proxies)} proxies")
         except requests.exceptions.RequestException as e:
-            logger.error(f"PROXY_MANAGER:: Error fetching proxies from API: {e}")
+            logger.error(f"Error fetching proxies from API: {e}")
         return manager
 
     def add_proxy(self, proxy: Proxy) -> None:
@@ -283,10 +299,10 @@ class ProxyManager:
         """
         with self._manager_lock:
             if any(existing_proxy.ip == proxy.ip and existing_proxy.ports == proxy.ports for existing_proxy in self.proxies):
-                logger.warning(f"proxy {proxy.ip} already exists and was not added")
+                logger.warning(f"Proxy {proxy.ip} already exists and was not added")
             else:
                 self.proxies.append(proxy)
-                logger.info(f"proxy {proxy.ip} added")
+                logger.info(f"Proxy {proxy.ip} added")
 
     def remove_proxy(self, proxy: Proxy) -> None:
         """
@@ -296,9 +312,9 @@ class ProxyManager:
         with self._manager_lock:
             try:
                 self.proxies.remove(proxy)
-                logger.info(f"proxy {proxy.ip} removed")
+                logger.info(f"Proxy {proxy.ip} removed")
             except ValueError:
-                logger.warning("proxy not found and cannot be removed")
+                logger.warning("Proxy not found and cannot be removed")
 
     def get_active_proxies(self) -> List[Proxy]:
         """
@@ -325,7 +341,7 @@ class ProxyManager:
         if proxy:
             self.remove_proxy(proxy)
         else:
-            logger.warning("proxy not found and cannot be removed")
+            logger.warning("Proxy not found and cannot be removed")
 
     def set_status(self, proxy: Proxy, status_str: str) -> bool:
         """
@@ -335,7 +351,7 @@ class ProxyManager:
             proxy_status = ProxyStatus(status_str.upper())
             return proxy.set_status(proxy_status)
         except ValueError:
-            logger.error(f"invalid status '{status_str}' provided for proxy {proxy.ip}")
+            logger.error(f"Invalid status '{status_str}' provided for proxy {proxy.ip}")
             return False
 
     def set_status_by_ip(self, ip: str, status_str: str) -> bool:
@@ -346,7 +362,7 @@ class ProxyManager:
         if proxy:
             return self.set_status(proxy, status_str)
         else:
-            logger.warning(f"PROXY_MANAGER:: proxy with IP {ip} not found")
+            logger.warning(f"Proxy with IP {ip} not found")
             return False
 
     def set_temporary_status(self, proxy: Proxy, temp_status: ProxyStatus, duration: int) -> bool:
@@ -354,7 +370,7 @@ class ProxyManager:
         Sets a temporary status for a specific proxy.
         """
         if proxy not in self.proxies:
-            logger.warning(f"PROXY_MANAGER:: proxy {proxy.ip} not managed and cannot set temporary status")
+            logger.warning(f"Proxy {proxy.ip} not managed and cannot set temporary status")
             return False
         return proxy.set_temporary_status(temp_status, duration, self)
 
@@ -366,7 +382,7 @@ class ProxyManager:
         if proxy:
             return self.set_temporary_status(proxy, temp_status, duration)
         else:
-            logger.warning(f"PROXY_MANAGER:: proxy with IP {ip} not found")
+            logger.warning(f"Proxy with IP {ip} not found")
             return False
 
     def pause_proxy(self, ip: str, duration: int) -> bool:
@@ -390,10 +406,12 @@ class ProxyManager:
             proxy = self.find_proxy_by_ip(ip)
             if proxy:
                 proxy.revert_status()
+                with self.proxy_available:
+                    self.proxy_available.notify_all()
             else:
-                logger.warning(f"PROXY_MANAGER:: proxy with IP {ip} not found for status revert")
+                logger.warning(f"Proxy with IP {ip} not found for status revert")
         except Exception as e:
-            logger.error(f"PROXY_MANAGER:: error reverting status for proxy {ip}: {e}")
+            logger.error(f"Error reverting status for proxy {ip}: {e}")
 
     def process_proxies(self, json_data: str) -> None:
         """
@@ -403,14 +421,14 @@ class ProxyManager:
             data = json.loads(json_data)
             proxies = data.get("proxies", [])
             if not isinstance(proxies, list):
-                logger.error("invalid JSON format: 'proxies' should be a list.")
+                logger.error("Invalid JSON format: 'proxies' should be a list.")
                 return
 
             for proxy_dict in proxies:
                 required_keys = {"ip", "ports", "user", "password", "proxy_address", "exp", "status"}
                 if not required_keys.issubset(proxy_dict.keys()):
                     missing = required_keys - proxy_dict.keys()
-                    logger.error(f"missing keys {missing} in proxy data: {proxy_dict}")
+                    logger.error(f"Missing keys {missing} in proxy data: {proxy_dict}")
                     continue
 
                 status_str = proxy_dict["status"].upper()
@@ -432,16 +450,16 @@ class ProxyManager:
                     )
                     self.add_proxy(proxy)
                 except KeyError as e:
-                    logger.error(f"missing key {e} in proxy data: {proxy_dict}")
+                    logger.error(f"Missing key {e} in proxy data: {proxy_dict}")
                 except Exception as e:
-                    logger.error(f"error processing proxy data: {e} | Data: {proxy_dict}")
+                    logger.error(f"Error processing proxy data: {e} | Data: {proxy_dict}")
 
-            logger.info(f"successfully added {len(self.proxies)} proxies")
+            logger.info(f"Successfully added {len(self.proxies)} proxies")
 
         except json.JSONDecodeError as jde:
-            logger.error(f"invalid JSON data provided: {jde}")
+            logger.error(f"Invalid JSON data provided: {jde}")
         except Exception as e:
-            logger.error(f"unexpected error processing proxies JSON: {e}")
+            logger.error(f"Unexpected error processing proxies JSON: {e}")
 
     def get_random_proxy(self) -> Optional[Proxy]:
         """
@@ -449,9 +467,62 @@ class ProxyManager:
         """
         active = self.get_active_proxies()
         if active:
+            logger.info(f"Selected active proxy: {active.ip}")
             return random.choice(active)
-        logger.warning("no active proxy available")
+        logger.warning("No active proxy available")
         return None
+
+    def get_available_proxy(self, timeout: Optional[int] = None) -> Optional[Proxy]:
+        """
+        Retrieves a random active proxy. If no active proxies are available,
+        checks for sleeping proxies and waits until one becomes active.
+
+        Args:
+            timeout (Optional[int]): Maximum time in seconds to wait for an active proxy.
+                                     If None, waits indefinitely.
+
+        Returns:
+            Optional[Proxy]: A Proxy instance with status ACTIVE, or None if timeout is reached.
+
+        Raises:
+            ProxyUnavailableError: If no proxy becomes active within the timeout period.
+        """
+        start_time = time.time()
+
+        while True:
+            active_proxies = self.get_active_proxies()
+
+            if active_proxies:
+                selected_proxy = random.choice(active_proxies)
+                logger.info(f"Selected active proxy: {selected_proxy.ip}")
+                return selected_proxy
+
+            # Check for sleeping proxies
+            sleeping_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.SLEEPING]
+
+            if not sleeping_proxies:
+                logger.warning("No active or sleeping proxies available.")
+                raise ProxyUnavailableError("No active or sleeping proxies available.")
+
+            # Calculate remaining time if timeout is set
+            if timeout is not None:
+                elapsed_time = time.time() - start_time
+                remaining_time = timeout - elapsed_time
+                if remaining_time <= 0:
+                    logger.error("Timeout reached while waiting for an active proxy.")
+                    raise ProxyUnavailableError("Timeout reached while waiting for an active proxy.")
+
+            else:
+                remaining_time = None  # Wait indefinitely
+
+            logger.info("No active proxies. Waiting for a sleeping proxy to become active...")
+
+            # Wait using the condition variable
+            with self.proxy_available:
+                if remaining_time is not None:
+                    self.proxy_available.wait(timeout=remaining_time)
+                else:
+                    self.proxy_available.wait()
 
     def add_proxy_from_api(self) -> None:
         """
