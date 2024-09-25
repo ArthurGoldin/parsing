@@ -6,12 +6,14 @@ import requests
 import random
 from enum import Enum
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError
 # from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import threading
 import atexit
+import ipaddress
+import socket
 
 # Configure logging
 try:
@@ -32,20 +34,31 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 
 
-# def job_listener(event):
-#     if event.exception:
-#         logger.error(f"The job {event.job_id} failed with exception: {event.exception}")
-#     else:
-#         logger.debug(f"The job {event.job_id} executed successfully.")
-
-
 # Register a shutdown hook
 atexit.register(lambda: scheduler.shutdown())
 
 
 class ProxyUnavailableError(Exception):
     """Exception raised when no proxies are available within the specified timeout."""
-    pass
+
+    def __init__(self, message: str = "No proxies available within the specified timeout.", timeout: Optional[int] = None, available_proxies: Optional[List['Proxy']] = None):
+        """
+        Initializes the ProxyUnavailableError.
+
+        Args:
+            message (str): Explanation of the error.
+            timeout (Optional[int]): The timeout duration in seconds.
+            available_proxies (Optional[List[Proxy]]): List of proxies that were available before timeout.
+        """
+        super().__init__(message)
+        self.timeout = timeout
+        self.available_proxies = available_proxies or []
+
+    def __str__(self):
+        base_message = super().__str__()
+        timeout_info = f" Timeout: {self.timeout} seconds." if self.timeout is not None else ""
+        proxy_info = f" Available Proxies: {[proxy.ip for proxy in self.available_proxies]}" if self.available_proxies else ""
+        return f"{base_message}{timeout_info}{proxy_info}"
 
 
 class ProxyStatus(Enum):
@@ -119,7 +132,8 @@ class Proxy:
         Returns:
             bool: True if the proxy status is ACTIVE, False otherwise.
         """
-        return self.status == ProxyStatus.ACTIVE and not self.is_expired()
+        with self._status_lock:
+            return self.status == ProxyStatus.ACTIVE and not self.is_expired()
 
     def is_expired(self) -> bool:
         """
@@ -129,7 +143,7 @@ class Proxy:
             bool: True if the current time is greater than the expiration time, False otherwise.
         """
         if time.time() > self.exp:
-            if self.set_status != ProxyStatus.EXPIRED:
+            if self.status != ProxyStatus.EXPIRED:
                 self.set_status(ProxyStatus.EXPIRED)
             return True
         return False
@@ -150,7 +164,7 @@ class Proxy:
                 self.status = status
                 logger.debug(f"Status of {self.ip} changed from {prev_status} to {status.value}")
                 return True
-            logger.error(f"Wrong status value")
+            logger.error(f"Wrong status value {status}")
             return False
 
     def set_temporary_status(self, temp_status: ProxyStatus, duration: int, manager_reference) -> bool:
@@ -184,18 +198,22 @@ class Proxy:
             logger.debug(f"Status of {self.ip} set to {temp_status.value} for {duration} seconds")
 
             # Calculate the run_time as a datetime object
-            run_time = datetime.now() + timedelta(seconds=duration)
+            run_time = datetime.now(timezone.utc) + timedelta(seconds=duration)
 
-            # Schedule the status to revert after 'duration' seconds
-            job = scheduler.add_job(
-                func=manager_reference.revert_proxy_status,
-                trigger='date',
-                run_date=run_time,  # Correct: datetime object
-                args=[self.ip],
-                id=f"revert_status_{self.ip}_{int(run_time.timestamp())}"
-            )
-            self._job_id = job.id
-            logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
+            try:
+                # Schedule the status to revert after 'duration' seconds
+                job = scheduler.add_job(
+                    func=manager_reference.revert_proxy_status,
+                    trigger='date',
+                    run_date=run_time,  # Correct: datetime object
+                    args=[self.ip],
+                    id=f"revert_status_{self.ip}_{int(run_time.timestamp())}_{random.randint(1000, 9999)}"
+                )
+                self._job_id = job.id
+                logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
+            except Exception as e:
+                logger.error(f"Failed to schedule job to revert status for {self.ip}: {e}")
+                return False
 
             return True
 
@@ -291,6 +309,118 @@ class ProxyManager:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching proxies from API: {e}")
         return manager
+
+    @staticmethod
+    def validate_proxy_address(address: str) -> bool:
+        """
+        Validates the format and resolves the proxy address string.
+
+        Args:
+            address (str): The proxy address string to validate.
+
+        Returns:
+            bool: True if the address is valid and resolvable, False otherwise.
+        """
+        # Split the address into user:pass@host:port
+        try:
+            user_pass, host_port = address.split('@')
+            host, port = host_port.rsplit(':', 1)
+
+            # Validate port
+            port = int(port)
+            if not (1 <= port <= 65535):
+                return False
+
+            # Validate host by attempting to resolve it
+            try:
+                socket.gethostbyname(host)
+            except socket.error:
+                return False
+
+            # Optional: Further validate user:pass if needed
+            if not user_pass or ':' not in user_pass:
+                return False
+
+            return True
+        except (ValueError, socket.error):
+            return False
+
+    @staticmethod
+    def validate_proxy_data(proxy_dict: Dict) -> bool:
+        """
+        Validates the proxy data dictionary to ensure all required fields are present and correctly formatted.
+
+        Args:
+            proxy_dict (Dict): A dictionary containing proxy data.
+
+        Returns:
+            bool: True if the proxy data is valid, False otherwise.
+        """
+        required_keys = {"ip", "ports", "user", "password", "proxy_address", "exp", "status"}
+
+        # Check for missing keys
+        if not required_keys.issubset(proxy_dict.keys()):
+            missing = required_keys - proxy_dict.keys()
+            logger.error(f"Validation Error: Missing keys {missing} in proxy data: {proxy_dict}")
+            return False
+
+        # Validate IP address
+        try:
+            ipaddress.ip_address(proxy_dict["ip"])
+        except ValueError:
+            logger.error(f"Validation Error: Invalid IP address '{proxy_dict['ip']}' in proxy data: {proxy_dict}")
+            return False
+
+        # Validate ports
+        ports = proxy_dict["ports"]
+        if not isinstance(ports, dict):
+            logger.error(f"Validation Error: 'ports' should be a dictionary in proxy data: {proxy_dict}")
+            return False
+        for protocol in ["http", "https"]:
+            if protocol not in ports:
+                logger.error(f"Validation Error: Missing '{protocol}' port in proxy data: {proxy_dict}")
+                return False
+            port = ports[protocol]
+            if not isinstance(port, int) or not (1 <= port <= 65535):
+                logger.error(f"Validation Error: Invalid port '{port}' for protocol '{protocol}' in proxy data: {proxy_dict}")
+                return False
+
+        # Validate user and password
+        if not isinstance(proxy_dict["user"], str) or not proxy_dict["user"]:
+            logger.error(f"Validation Error: Invalid or empty 'user' in proxy data: {proxy_dict}")
+            return False
+        if not isinstance(proxy_dict["password"], str) or not proxy_dict["password"]:
+            logger.error(f"Validation Error: Invalid or empty 'password' in proxy data: {proxy_dict}")
+            return False
+
+        # Validate proxy_address
+        proxy_address = proxy_dict["proxy_address"]
+        if not isinstance(proxy_address, dict):
+            logger.error(f"Validation Error: 'proxy_address' should be a dictionary in proxy data: {proxy_dict}")
+            return False
+        for protocol in ["http", "https"]:
+            if protocol not in proxy_address:
+                logger.error(f"Validation Error: Missing '{protocol}' proxy_address in proxy data: {proxy_dict}")
+                return False
+            address = proxy_address[protocol]
+            if not isinstance(address, str) or not ProxyManager.validate_proxy_address(address):
+                logger.error(f"Validation Error: Invalid proxy_address '{address}' for protocol '{protocol}' in proxy data: {proxy_dict}")
+                return False
+
+        # Validate expiration time
+        exp = proxy_dict["exp"]
+        if not isinstance(exp, (int, float)) or exp <= time.time():
+            logger.error(f"Validation Error: Invalid or past 'exp' timestamp '{exp}' in proxy data: {proxy_dict}")
+            return False
+
+        # Validate status
+        status_str = proxy_dict["status"].upper()
+        if status_str not in ProxyStatus.__members__:
+            logger.warning(f"Validation Warning: Unknown status '{status_str}' in proxy data: {proxy_dict}. Setting to UNDEFINED.")
+            # The ProxyStatus Enum will handle this by setting it to UNDEFINED
+
+        # All validations passed
+        return True
 
     def add_proxy(self, proxy: Proxy) -> None:
         """
@@ -415,7 +545,8 @@ class ProxyManager:
 
     def process_proxies(self, json_data: str) -> None:
         """
-        Processes a JSON string containing proxy data, creates Proxy instances, and adds them to the manager.
+        Processes a JSON string containing proxy data, validates each proxy, creates Proxy instances,
+        and adds them to the manager.
         """
         try:
             data = json.loads(json_data)
@@ -424,38 +555,40 @@ class ProxyManager:
                 logger.error("Invalid JSON format: 'proxies' should be a list.")
                 return
 
+            invalid_proxies = []
             for proxy_dict in proxies:
-                required_keys = {"ip", "ports", "user", "password", "proxy_address", "exp", "status"}
-                if not required_keys.issubset(proxy_dict.keys()):
-                    missing = required_keys - proxy_dict.keys()
-                    logger.error(f"Missing keys {missing} in proxy data: {proxy_dict}")
-                    continue
+                if ProxyManager.validate_proxy_data(proxy_dict):
+                    status_str = proxy_dict["status"].upper()
+                    try:
+                        status = ProxyStatus(status_str)
+                    except ValueError:
+                        status = ProxyStatus.UNDEFINED
 
-                status_str = proxy_dict["status"].upper()
-                try:
-                    status = ProxyStatus(status_str)
-                except ValueError:
-                    status = ProxyStatus.UNDEFINED
-
-                # Proceed to create and add the Proxy instance
-                try:
-                    proxy = Proxy(
-                        ip=proxy_dict["ip"],
-                        ports=proxy_dict["ports"],
-                        user=proxy_dict["user"],
-                        password=proxy_dict["password"],
-                        proxy_address=proxy_dict["proxy_address"],
-                        exp=proxy_dict["exp"],
-                        status=status
-                    )
-                    self.add_proxy(proxy)
-                except KeyError as e:
-                    logger.error(f"Missing key {e} in proxy data: {proxy_dict}")
-                except Exception as e:
-                    logger.error(f"Error processing proxy data: {e} | Data: {proxy_dict}")
+                    # Proceed to create and add the Proxy instance
+                    try:
+                        proxy = Proxy(
+                            ip=proxy_dict["ip"],
+                            ports=proxy_dict["ports"],
+                            user=proxy_dict["user"],
+                            password=proxy_dict["password"],
+                            proxy_address=proxy_dict["proxy_address"],
+                            exp=proxy_dict["exp"],
+                            status=status
+                        )
+                        self.add_proxy(proxy)
+                    except KeyError as e:
+                        logger.error(f"Missing key {e} in proxy data: {proxy_dict}")
+                        invalid_proxies.append(proxy_dict)
+                    except Exception as e:
+                        logger.error(f"Error processing proxy data: {e} | Data: {proxy_dict}")
+                        invalid_proxies.append(proxy_dict)
+                else:
+                    # Proxy data is invalid; already logged within validate_proxy_data
+                    invalid_proxies.append(proxy_dict)
 
             logger.info(f"Successfully added {len(self.proxies)} proxies")
-
+            if invalid_proxies:
+                logger.warning(f"Skipped {len(invalid_proxies)} invalid proxies.")
         except json.JSONDecodeError as jde:
             logger.error(f"Invalid JSON data provided: {jde}")
         except Exception as e:
@@ -464,13 +597,18 @@ class ProxyManager:
     def get_random_proxy(self) -> Optional[Proxy]:
         """
         Retrieves a random active proxy.
+
+        Returns:
+            Optional[Proxy]: A Proxy instance with status ACTIVE, or None if no active proxies are available.
         """
-        active = self.get_active_proxies()
-        if active:
-            logger.info(f"Selected active proxy: {active.ip}")
-            return random.choice(active)
-        logger.warning("No active proxy available")
-        return None
+        active_proxies = self.get_active_proxies()
+        if active_proxies:
+            selected_proxy = random.choice(active_proxies)
+            logger.info(f"Selected active proxy: {selected_proxy.ip}")
+            return selected_proxy
+        else:
+            logger.warning("No active proxies available!")
+            return None
 
     def get_available_proxy(self, timeout: Optional[int] = None) -> Optional[Proxy]:
         """
@@ -510,7 +648,11 @@ class ProxyManager:
                 remaining_time = timeout - elapsed_time
                 if remaining_time <= 0:
                     logger.error("Timeout reached while waiting for an active proxy.")
-                    raise ProxyUnavailableError("Timeout reached while waiting for an active proxy.")
+                    raise ProxyUnavailableError(
+                        message="Timeout reached while waiting for an active proxy.",
+                        timeout=timeout,
+                        available_proxies=self.proxies
+                    )
 
             else:
                 remaining_time = None  # Wait indefinitely
@@ -539,6 +681,9 @@ class ProxyManager:
 
 
 if __name__ == "__main__":
+    logger.info("THIS IS INFO")
+    logger.debug("THIS IS DEBUG")
+
     proxy_list = """
     {
         "proxies": [
@@ -579,17 +724,17 @@ if __name__ == "__main__":
 
     # Get a random active proxy
     proxy = manager.get_random_proxy()
-    print(f"Selected Proxy: {proxy}")
-    print("\n")
+    # print(f"Selected Proxy: {proxy}")
+    # print("\n")
 
     if proxy:
         # Pause the proxy for 10 seconds
         manager.pause_proxy(proxy.ip, duration=2)
-        print(f"After pausing: {proxy}")
+        # print(f"After pausing: {proxy}")
 
         # Sleep the proxy for 5 seconds (this will override the previous pause)
         manager.sleep_proxy(proxy.ip, duration=1)
-        print(f"After sleeping: {proxy}")
+        # print(f"After sleeping: {proxy}")
 
         # Wait to observe the status changes
         print("Waiting for 5 seconds to allow status to revert...")
