@@ -14,6 +14,7 @@ import threading
 import atexit
 import ipaddress
 import socket
+import uuid
 
 # Configure logging
 try:
@@ -67,6 +68,7 @@ class ProxyStatus(Enum):
 
     Attributes:
         ACTIVE (str): Indicates the proxy is active.
+        BLOCKED (str): Indicates the proxy was blocked by a server (host)
         EXPIRED (str) = Indicates the proxy is expired
         NOT_ACTIVE (str): Indicates the proxy is not active.
         PAUSED (str): Indicates the proxy is paused temporarily.
@@ -74,6 +76,7 @@ class ProxyStatus(Enum):
         UNDEFINED (str): Indicates the proxy status is undefined.
     """
     ACTIVE = 'ACTIVE'
+    BLOCKED = 'BLOCKED'
     EXPIRED = 'EXPIRED'
     NOT_ACTIVE = 'NOT ACTIVE'
     PAUSED = 'PAUSED'
@@ -109,7 +112,7 @@ class Proxy:
         password: str,
         proxy_address: Dict[str, str],
         exp: int,
-        status: ProxyStatus
+        status: 'ProxyStatus'  # Assuming ProxyStatus is an enum or similar class
     ):
         """
         Initializes a new instance of the Proxy class.
@@ -120,20 +123,48 @@ class Proxy:
         self.password = password
         self.proxy_address = proxy_address
         self.exp = exp
-        self.status = status
         self._status_lock = threading.Lock()  # To handle concurrent status updates
+        self._status = status  # Use _status as a backing attribute
         self._job_id = None  # To keep track of the scheduled job for reverting status
+
+    @property
+    def status(self) -> 'ProxyStatus':
+        """
+        Thread-safe getter for the proxy's status.
+        """
+        with self._status_lock:
+            logger.debug(f"Reading status of {self.ip}: {self._status.value}")
+            return self._status
+
+    @status.setter
+    def status(self, new_status: 'ProxyStatus'):
+        """
+        Thread-safe setter for the proxy's status.
+        """
+        with self._status_lock:
+            logger.debug(f"Changing status of {self.ip} from {self._status.value} to {new_status.value}")
+            self._status = new_status
 
     def is_active(self) -> bool:
         """
         Determines if the proxy is currently active.
-        If the proxy is expired, updates the status accordingly
+        If the proxy is expired, updates the status accordingly.
 
         Returns:
             bool: True if the proxy status is ACTIVE, False otherwise.
         """
         with self._status_lock:
-            return self.status == ProxyStatus.ACTIVE and not self.is_expired()
+            return self._status == ProxyStatus.ACTIVE and not self._check_expired()
+
+    def _check_expired(self) -> bool:
+        """
+        Internal method to check expiration without acquiring the lock.
+        """
+        if time.time() > self.exp:
+            if self._status != ProxyStatus.EXPIRED:
+                self._status = ProxyStatus.EXPIRED
+            return True
+        return False
 
     def is_expired(self) -> bool:
         """
@@ -143,10 +174,17 @@ class Proxy:
             bool: True if the current time is greater than the expiration time, False otherwise.
         """
         if time.time() > self.exp:
-            if self.status != ProxyStatus.EXPIRED:
-                self.set_status(ProxyStatus.EXPIRED)
+            if self.status != ProxyStatus.EXPIRED:  # Use property to ensure the setter is triggered
+                self.status = ProxyStatus.EXPIRED   # This will call the setter
             return True
         return False
+
+    # def get_status(self) -> ProxyStatus:
+    #     """
+    #     Returns a status of the proxy
+    #     """
+    #     with self._status_lock:
+    #         return self.status
 
     def set_status(self, status: ProxyStatus) -> bool:
         """
@@ -161,13 +199,13 @@ class Proxy:
         with self._status_lock:
             if isinstance(status, ProxyStatus):
                 prev_status = self.status
-                self.status = status
+                self._status = status
                 logger.debug(f"Status of {self.ip} changed from {prev_status} to {status.value}")
                 return True
             logger.error(f"Wrong status value {status}")
             return False
 
-    def set_temporary_status(self, temp_status: ProxyStatus, duration: int, manager_reference) -> bool:
+    def set_temporary_status(self, temp_status: ProxyStatus, duration: float, manager_reference) -> bool:
         """
         Sets a temporary status for the proxy for a specified duration using APScheduler.
 
@@ -183,52 +221,52 @@ class Proxy:
             logger.error(f"Invalid temporary status '{temp_status}'")
             return False
 
-        with self._status_lock:
-            # Cancel any existing scheduled job
-            if self._job_id:
-                try:
-                    scheduler.remove_job(self._job_id)
-                    logger.debug(f"Existing job {self._job_id} for {self.ip} removed")
-                except JobLookupError:
-                    logger.warning(f"Job {self._job_id} not found for {self.ip}")
-                self._job_id = None
-
-            # Set the temporary status
-            self.status = temp_status
-            logger.debug(f"Status of {self.ip} set to {temp_status.value} for {duration} seconds")
-
-            # Calculate the run_time as a datetime object
-            run_time = datetime.now(timezone.utc) + timedelta(seconds=duration)
-
+        # with self._status_lock:
+        # Cancel any existing scheduled job
+        if self._job_id:
             try:
-                # Schedule the status to revert after 'duration' seconds
-                job = scheduler.add_job(
-                    func=manager_reference.revert_proxy_status,
-                    trigger='date',
-                    run_date=run_time,  # Correct: datetime object
-                    args=[self.ip],
-                    id=f"revert_status_{self.ip}_{int(run_time.timestamp())}_{random.randint(1000, 9999)}"
-                )
-                self._job_id = job.id
-                logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
-            except Exception as e:
-                logger.error(f"Failed to schedule job to revert status for {self.ip}: {e}")
-                return False
+                scheduler.remove_job(self._job_id)
+                logger.debug(f"Existing job {self._job_id} for {self.ip} removed")
+            except JobLookupError:
+                logger.warning(f"Job {self._job_id} not found for {self.ip}")
+            self._job_id = None
 
-            return True
+        # Set the temporary status
+        self.status = temp_status  # Directly set the backing attribute, avoiding recursion
+        logger.debug(f"Status of {self.ip} set to {temp_status.value} for {duration} seconds")
+
+        # Calculate the run_time as a datetime object
+        run_time = datetime.now(timezone.utc) + timedelta(seconds=duration)
+
+        try:
+            # Schedule the status to revert after 'duration' seconds
+            job = scheduler.add_job(
+                func=manager_reference.revert_proxy_status,
+                trigger='date',
+                run_date=run_time,
+                args=[self.ip],
+                id=f"revert_status_{self.ip}_{uuid.uuid4()}"
+            )
+            self._job_id = job.id
+            logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
+        except Exception as e:
+            logger.error(f"Failed to schedule job to revert status for {self.ip}: {e}")
+            return False
+
+        return True
 
     def revert_status(self):
         """
         Reverts the proxy status back to ACTIVE if not expired.
         """
-        with self._status_lock:
-            if not self.is_expired():
-                self.status = ProxyStatus.ACTIVE
-                logger.debug(f"Status of {self.ip} reverted to ACTIVE after timeout")
-            else:
-                self.set_status(ProxyStatus.EXPIRED)
-                logger.debug(f"Status of {self.ip} changed to {self.status.value} as it is expired")
-            self._job_id = None  # Clear the job ID since it's executed
+        # with self._status_lock:
+        if not self._check_expired():
+            self.status = ProxyStatus.ACTIVE
+            logger.debug(f"Status of {self.ip} reverted to ACTIVE after timeout")
+        else:
+            self.status = ProxyStatus.EXPIRED
+            logger.debug(f"Status of {self.ip} changed to {self.status.value} as it is expired")
+        self._job_id = None  # Clear the job ID since it's executed
 
     def __repr__(self):
         """
@@ -249,13 +287,21 @@ class ProxyManager:
     Manages a collection of Proxy instances.
     """
 
-    def __init__(self):
+    def __init__(self, check_exp_interval: int = 100):
         """
         Initializes a new instance of the ProxyManager class with an empty proxy list.
         """
         self.proxies: List[Proxy] = []
         self._manager_lock = threading.Lock()  # To handle concurrent access
-        self.proxy_available = threading.Condition()
+        self.proxy_available = threading.Condition(self._manager_lock)
+
+        # Schedule periodic expiration checks every 10 minutes
+        scheduler.add_job(
+            self.check_expired_proxies,
+            trigger='interval',
+            minutes=check_exp_interval,
+            id="check_expired_proxies"
+        )
 
     @classmethod
     def from_proxies(cls, proxies: List[Proxy]):
@@ -278,7 +324,7 @@ class ProxyManager:
         return manager
 
     @classmethod
-    def from_json_file(cls, file_path: str):
+    def from_json_file(cls, file_path: str = "data/proxy/proxy.json"):
         """
         Alternative constructor to initialize ProxyManager by reading and processing a JSON file.
         """
@@ -333,7 +379,7 @@ class ProxyManager:
 
             # Validate host by attempting to resolve it
             try:
-                socket.gethostbyname(host)
+                socket.getaddrinfo(host, port)
             except socket.error:
                 return False
 
@@ -422,6 +468,27 @@ class ProxyManager:
         # All validations passed
         return True
 
+    @staticmethod
+    def test_proxy(proxy_addr: Dict[str, str]) -> bool:
+        """
+            Temporary function for custom proxy checking
+        """
+        try:
+            response = requests.get("https://ipinfo.io", proxies=proxy_addr, timeout=5)
+            logger.debug("Proxy is valid")
+            # logger.info(response.json())
+            return True
+        except requests.exceptions.ProxyError:
+            logger.error("Proxy connection failed.")
+            return False
+
+    def check_expired_proxies(self):
+        with self._manager_lock:
+            for proxy in self.proxies:
+                if proxy.is_expired():
+                    logger.info(f"Proxy {proxy.ip} has expired and is now set to EXPIRED.")
+                    self.proxy_available.notify_all()
+
     def add_proxy(self, proxy: Proxy) -> None:
         """
         Adds a Proxy instance to the manager's proxy list and logs the action.
@@ -453,6 +520,13 @@ class ProxyManager:
         with self._manager_lock:
             return [proxy for proxy in self.proxies if proxy.is_active()]
 
+    def get_sleeping_proxies(self) -> List[Proxy]:
+        """
+        Retrieves all proxies with a status of 'SLEEPING' and not expired.
+        """
+        with self._manager_lock:
+            return [proxy for proxy in self.proxies if proxy.status == ProxyStatus.SLEEPING]
+
     def find_proxy_by_ip(self, ip: str) -> Optional[Proxy]:
         """
         Searches for a Proxy instance in the manager's proxy list by its IP address.
@@ -474,12 +548,13 @@ class ProxyManager:
             logger.warning("Proxy not found and cannot be removed")
 
     def set_status(self, proxy: Proxy, status_str: str) -> bool:
-        """
-        Sets the status of a specific Proxy instance based on a status string.
-        """
         try:
             proxy_status = ProxyStatus(status_str.upper())
-            return proxy.set_status(proxy_status)
+            result = proxy.set_status(proxy_status)
+            if result and proxy_status == ProxyStatus.ACTIVE:
+                with self.proxy_available:
+                    self.proxy_available.notify_all()
+            return result
         except ValueError:
             logger.error(f"Invalid status '{status_str}' provided for proxy {proxy.ip}")
             return False
@@ -495,7 +570,7 @@ class ProxyManager:
             logger.warning(f"Proxy with IP {ip} not found")
             return False
 
-    def set_temporary_status(self, proxy: Proxy, temp_status: ProxyStatus, duration: int) -> bool:
+    def set_temporary_status(self, proxy: Proxy, temp_status: ProxyStatus, duration: float) -> bool:
         """
         Sets a temporary status for a specific proxy.
         """
@@ -504,7 +579,7 @@ class ProxyManager:
             return False
         return proxy.set_temporary_status(temp_status, duration, self)
 
-    def set_temporary_status_by_ip(self, ip: str, temp_status: ProxyStatus, duration: int) -> bool:
+    def set_temporary_status_by_ip(self, ip: str, temp_status: ProxyStatus, duration: float) -> bool:
         """
         Sets a temporary status for a proxy identified by its IP address.
         """
@@ -515,13 +590,13 @@ class ProxyManager:
             logger.warning(f"Proxy with IP {ip} not found")
             return False
 
-    def pause_proxy(self, ip: str, duration: int) -> bool:
+    def pause_proxy(self, ip: str, duration: float) -> bool:
         """
         Pauses a proxy for a specified duration.
         """
         return self.set_temporary_status_by_ip(ip, ProxyStatus.PAUSED, duration)
 
-    def sleep_proxy(self, ip: str, duration: int) -> bool:
+    def sleep_proxy(self, ip: str, duration: float) -> bool:
         """
         Puts a proxy to sleep for a specified duration.
         """
@@ -557,7 +632,7 @@ class ProxyManager:
 
             invalid_proxies = []
             for proxy_dict in proxies:
-                if ProxyManager.validate_proxy_data(proxy_dict):
+                if self.validate_proxy_data(proxy_dict):
                     status_str = proxy_dict["status"].upper()
                     try:
                         status = ProxyStatus(status_str)
@@ -655,7 +730,7 @@ class ProxyManager:
                     )
 
             else:
-                remaining_time = None  # Wait indefinitely
+                remaining_time = 100  # wait at most 100 seconds
 
             logger.info("No active proxies. Waiting for a sleeping proxy to become active...")
 
@@ -680,66 +755,83 @@ class ProxyManager:
         return f"ProxyManager(proxies={self.proxies})"
 
 
-if __name__ == "__main__":
-    logger.info("THIS IS INFO")
-    logger.debug("THIS IS DEBUG")
+def convert_to_unix_timestamp(date_str: str) -> float:
+    # Remove the "(UTC+3)" part and extract the UTC offset
+    date_part, time_part, tz_part = date_str.split(" ")
+    utc_offset_hours = int(tz_part[4:-1])  # Extract "+3" from "(UTC+3)" and convert to integer
 
+    # Parse the date and time using strptime
+    dt = datetime.strptime(f"{date_part} {time_part}", "%d.%m.%Y %H:%M")
+
+    # Adjust the time for the timezone offset (UTC+3 in this case)
+    dt -= timedelta(hours=utc_offset_hours)
+
+    # Convert to a Unix timestamp
+    unix_timestamp = dt.timestamp().__int__()
+
+    return unix_timestamp
+
+
+if __name__ == "__main__":
     proxy_list = """
     {
         "proxies": [
             {
-                "ip": "127.0.0.1",
+                "ip": "193.28.183.161",
                 "ports": {
-                    "http": 1533,
-                    "https": 11533
+                    "http": 6176,
+                    "https": 6176
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@193.28.183.78:1533",
-                    "https": "user210707:6qml5v@193.28.183.78:11533"
+                    "http": "user210707:6qml5v@193.28.183.161:6176",
+                    "https": "user210707:6qml5v@193.28.183.161:6176"
                 },
-                "exp": 1927446376,
+                "exp": 1729150920,
                 "status": "ACTIVE"
             },
             {
-                "ip": "127.0.0.2",
+                "ip": "93.28.183.102",
                 "ports": {
-                    "http": 1533,
-                    "https": 11533
+                    "http": 6176,
+                    "https": 6176
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@193.28.183.78:1533",
-                    "https": "user210707:6qml5v@193.28.183.78:11533"
+                    "http": "user210707:6qml5v@193.28.183.102:6176",
+                    "https": "user210707:6qml5v@193.28.183.102:6176"
                 },
-                "exp": 1927446376,
+                "exp": 1729150920,
                 "status": "ACTIVE"
             }
         ]
     }
     """
-    manager = ProxyManager.from_json(proxy_list)
+    # manager = ProxyManager.from_json(proxy_list)
+    manager = ProxyManager.from_json_file('data/proxy/proxy.json')
 
-    # Get a random active proxy
-    proxy = manager.get_random_proxy()
-    # print(f"Selected Proxy: {proxy}")
-    # print("\n")
+    for i in range(4):
+        # Get a random active proxy
+        proxy = manager.get_available_proxy()
+        # print(f"Selected Proxy: {proxy}")
 
-    if proxy:
-        # Pause the proxy for 10 seconds
-        manager.pause_proxy(proxy.ip, duration=2)
-        # print(f"After pausing: {proxy}")
+        if proxy:
+            # Pause the proxy for 10 seconds
+            # manager.pause_proxy(proxy.ip, duration=2)
+            # print(f"After pausing: {proxy}")
 
-        # Sleep the proxy for 5 seconds (this will override the previous pause)
-        manager.sleep_proxy(proxy.ip, duration=1)
-        # print(f"After sleeping: {proxy}")
+            # Sleep the proxy for 5 seconds (this will override the previous pause)
+            print(f"setting proxy {proxy.ip} for a sleep")
+            manager.sleep_proxy(proxy.ip, duration=2)
+            # print(f"After sleeping: {proxy}")
 
-        # Wait to observe the status changes
-        print("Waiting for 5 seconds to allow status to revert...")
-        time.sleep(5)
-        print(f"Final Status: {proxy}")
-
+            # Wait to observe the status changes
+            # print("Waiting for 5 seconds to allow status to revert...")
+            # time.sleep(5)
+            # print(f"Final Status: {proxy}")
+    time.sleep(5)
+    print(f"Number of active proxies: {len(manager.get_active_proxies())}")
     # Print all proxies
     # print(manager.proxies)

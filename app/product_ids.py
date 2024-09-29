@@ -335,7 +335,7 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
                                     graphql_url: str = "https://graphql.uzum.uz/",
                                     save_data: bool = True,
                                     load_most_recent_if_failed: bool = True,
-                                    sort_result: bool = True,
+                                    sort_result: bool = False,
                                     **kwargs) -> List[int]:
     """
     Fetch product IDs by categories and optionally save the fetched data.

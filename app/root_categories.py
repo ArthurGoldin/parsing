@@ -51,7 +51,7 @@ def combine_products_into_tree(category_tree: Dict[str, Any], products_by_catego
     return category_tree
 
 
-def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, sort_result: bool = True) -> List[Dict[str, Any]]:
+def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, sort_result: bool = False) -> List[Dict[str, Any]]:
     """
     Recursively find all leaf categories in the category tree.
 
