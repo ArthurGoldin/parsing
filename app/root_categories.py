@@ -8,11 +8,11 @@ import brotli
 import glob
 import os
 import sys
+import configparser
 from typing import List, Dict, Any
 from fake_useragent import UserAgent
-import configparser
 from save_and_load_data import save_to_file
-
+from proxy_manager import ProxyManager
 
 # Configure logging
 try:
@@ -157,6 +157,7 @@ def get_root_categories(request_retries: int = 8,
 
     root_categories = None
     request_attempts = 0
+    proxy_manager = ProxyManager.from_json_file("data/proxy/proxy.json")
 
     def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
         """
@@ -189,7 +190,12 @@ def get_root_categories(request_retries: int = 8,
 
     while request_attempts <= request_retries:
         try:
-            conn = http.client.HTTPSConnection(host)
+            logger.debug(f"Picking a proxy and establishing a connection")
+            conn, _ = proxy_manager.make_connection(host)
+            if conn is None:
+                logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+                conn = http.client.HTTPSConnection(host)
+
             conn.request("GET", endpoint, headers=headers)
             response = conn.getresponse()
 
@@ -226,7 +232,9 @@ def get_root_categories(request_retries: int = 8,
             if ua is not None:
                 headers['User-Agent'] = f'{ua.random}'
         finally:
-            conn.close()
+            proxy_manager.shutdown_scheduler()
+            if conn is not None:
+                conn.close()
 
     if root_categories is None:
         logger.warning(

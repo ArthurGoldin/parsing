@@ -1,12 +1,5 @@
-from typing import List, Dict, Any
 import argparse
-from save_and_load_data import save_to_file, load_last_saved_json
-import graphql_query_generator
-from token_manager import TokenManager
 import configparser
-import sys
-from fake_useragent import UserAgent
-from typing import List, Tuple, Dict, Any
 import brotli
 import zlib
 import logging.config
@@ -14,7 +7,13 @@ import logging
 import json
 import time
 import http.client
-import base64
+import graphql_query_generator
+from typing import List, Dict, Any
+from token_manager import TokenManager
+from fake_useragent import UserAgent
+from typing import List, Tuple, Dict, Any
+from save_and_load_data import save_to_file, load_last_saved_json
+from proxy_manager import ProxyManager
 
 # Configure logging
 try:
@@ -194,14 +193,62 @@ def get_product_ids_by_category(token_manager: TokenManager,
     done = False
     status = None
 
+    proxy_manager = ProxyManager.from_json_file("data/proxy/proxy.json")
+    conn = None
+    current_proxy_ip = None
+    use_direct_connection = False
+    proxy_timeout = 10
+    proxy_manager_timeout = 10
+    batch_size = 10000
+    ind = 0
+    proxy_ind = 0
+
     def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
         logger.info(f"Server rejected. Attempt number {request_attempts}")
         wait_time = backoff_factor * (2 ** request_attempts)
         logger.info(f"Retrying in {wait_time} seconds...")
         time.sleep(wait_time)
 
+    def make_connection(timeout: float = proxy_timeout if proxy_manager_timeout else 10,
+                        pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
+                        put_to_sleep: bool = False,
+                        make_direct_connection: bool = use_direct_connection if use_direct_connection else False
+                        ) -> Tuple[http.client.HTTPSConnection, str]:
+        nonlocal conn
+        nonlocal current_proxy_ip
+        nonlocal proxy_ind
+
+        def direct_connection() -> http.client.HTTPSConnection:
+            if request_attempts > 0:
+                wait_with_backoff(request_attempts, backoff_factor)
+            return http.client.HTTPSConnection(host)
+
+        if not make_direct_connection:
+            if conn is not None:  # Close the previous connection before establishing a new one
+                logger.debug(f"Closing connection for batch {ind // batch_size}")
+                conn.close()
+                if current_proxy_ip and put_to_sleep:
+                    logger.debug(f"Setting to sleep proxy {current_proxy_ip}")
+                    proxy_manager.sleep_proxy(current_proxy_ip, timeout)
+                    proxy_ind = 0
+            logger.debug(f"Establishing connection for batch {ind // batch_size + 1}")
+            headers['User-Agent'] = ua.random
+            try:
+                logger.debug(f"Picking a proxy and establishing a connection")
+                conn, current_proxy_ip = proxy_manager.make_connection(host, pm_timeout)
+            except:
+                logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+                conn = direct_connection()
+                current_proxy_ip = None
+        else:
+            logger.debug(f"Establishing direct connection to {host}")
+            conn = direct_connection()
+            current_proxy_ip = None
+        return conn, current_proxy_ip
+
     try:
-        conn = http.client.HTTPSConnection(host)
+        if proxy_ind % batch_size == 0:
+            conn, current_proxy_ip = make_connection()
 
         while not done and request_attempts <= request_retries:
             graphql_query_generator.set_query_variables(
@@ -233,24 +280,35 @@ def get_product_ids_by_category(token_manager: TokenManager,
                             error.get('message', 'Unknown error') for error in json_data['errors']]
                         error_429 = False
                         for error_message in error_messages:
-                            logger.error(f'GraphQL Error: {error_message}')
+                            logger.warning(f'GraphQL Error: {error_message}')
                             if '429' in error_message:
                                 error_429 = True
 
                         if error_429:
+                            logger.warning("429: Blocked by the server due to too many requests.")
                             status = 429
-                            conn.close()
-                            wait_with_backoff(request_attempts, backoff_factor)
                             if request_attempts == 0:
-                                headers['User-Agent'] = ua.random
-                                new_token = token_manager.get_token_instance()
-                                if new_token is not None:
-                                    auth_token = new_token
-                                    headers['Authorization'] = f'Bearer {
-                                        auth_token}'
+                                auth_token = token_manager.get_token_instance()
+                                headers['Authorization'] = f'Bearer {auth_token}'
                             request_attempts += 1
+                            if request_attempts > 1:
+                                retry_time = int(response.headers.get("Retry-After", 1))
+                                proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                                conn, current_proxy_ip = make_connection(timeout=retry_time)
+                            else:
+                                conn, current_proxy_ip = make_connection()
+                            # conn.close()
+                            # wait_with_backoff(request_attempts, backoff_factor)
+                            # if request_attempts == 0:
+                            #     headers['User-Agent'] = ua.random
+                            #     new_token = token_manager.get_token_instance()
+                            #     if new_token is not None:
+                            #         auth_token = new_token
+                            #         headers['Authorization'] = f'Bearer {
+                            #             auth_token}'
+                            # request_attempts += 1
 
-                            conn = http.client.HTTPSConnection(host)
+                            # conn = http.client.HTTPSConnection(host)
                             continue
 
                     data = get_ids_from_json(json_data)
@@ -264,8 +322,7 @@ def get_product_ids_by_category(token_manager: TokenManager,
                         amount = json_data.get("data", {}).get(
                             "makeSearch", {}).get("total")
 
-                    logger.info(f'Collected {len(data)} of total {
-                                len(data_list)} collected items in category {category_id}')
+                    logger.debug(f'Collected {len(data)} of total {len(data_list)} collected items in category {category_id}')
 
                     items_offset += min(page_limit, amount - len(data_list))
                     if (len(data_list) >= amount) or (data == prev_data):
@@ -285,25 +342,46 @@ def get_product_ids_by_category(token_manager: TokenManager,
 
                     prev_data = data
                     request_attempts = 0
+                    ind += 1
+                    proxy_ind += 1
 
                 elif response.status == 401:  # authorization failed
-                    logger.info(
-                        f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
-                    conn.close()
-                    wait_with_backoff(request_attempts, backoff_factor)
+                    logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
+                    # wait_with_backoff(request_attempts, backoff_factor)
                     auth_token = token_manager.get_token_instance()
-                    logger.info(auth_token)
                     headers['Authorization'] = f'Bearer {auth_token}'
                     request_attempts += 1
-                    conn = http.client.HTTPSConnection(host)
-                elif response.status == 429:
-                    # Server blocking due to multiple requests
-                    logger.info(
-                        "429: Blocked by a server due to too many requests.")
-                    headers['User-Agent'] = ua.random
-                    wait_with_backoff(request_attempts, backoff_factor)
+                    if request_attempts > 1:
+                        conn, current_proxy_ip = make_connection()
+                    else:
+                        conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                    # logger.info(f"{response.status}: Authorization failed during the GraphQL query; retrieving a new token...")
+                    # conn.close()
+                    # wait_with_backoff(request_attempts, backoff_factor)
+                    # auth_token = token_manager.get_token_instance()
+                    # logger.info(auth_token)
+                    # headers['Authorization'] = f'Bearer {auth_token}'
+                    # request_attempts += 1
+                    # conn = http.client.HTTPSConnection(host)
+
+                elif response.status == 429:  # too many requests
+                    retry_time = int(response.headers.get("Retry-After", 1))
+                    logger.warning("429: Blocked by the server due to too many requests.")
+                    # wait_with_backoff(request_attempts, backoff_factor)
                     request_attempts += 1
+                    if request_attempts > 1:
+                        retry_time = int(response.headers.get("Retry-After", 1))
+                        proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                        conn, current_proxy_ip = make_connection(timeout=retry_time)
+                    else:
+                        conn, current_proxy_ip = make_connection()
                     continue
+                    # # Server blocking due to multiple requests
+                    # logger.info("429: Blocked by a server due to too many requests.")
+                    # headers['User-Agent'] = ua.random
+                    # wait_with_backoff(request_attempts, backoff_factor)
+                    # request_attempts += 1
+                    # continue
                 else:
                     raise ValueError(f"Bad response status on a GraphQL query: {
                         response.status}")
@@ -314,14 +392,15 @@ def get_product_ids_by_category(token_manager: TokenManager,
     except Exception as e:
         logger.error(f"In get_products_id_by_category: {e}")
     finally:
-        conn.close()
+        proxy_manager.shutdown_scheduler()
+        if conn is not None:
+            conn.close()
 
     if len(data_list) != 0:
         logger.info(f"Finished retrieving category ids. Total collected {
                     len(data_list)} out of {amount} in GraphQL in category {category_id}")
         data_list = list(set(data_list))
-        logger.info(f"Total unique ids: {len(data_list)} in category {
-                    category_id}, return status: {status}")
+        logger.info(f"Total unique ids: {len(data_list)} in category {category_id}, return status: {status}")
         if save_data:
             save_to_file(data_list, f'category_{category_id}_pr_ids', 'products_by_category', separate_folder=False)
     else:
@@ -380,9 +459,6 @@ def fetch_product_ids_by_categories(categories: List[Dict[str, Any]],
 
                 if failed_categories:
                     save_to_file(failed_categories, 'failed_categories_ids', failed_categories_dir, separate_folder=False)
-                    # with open(f"{data_dir}/failed_categories/failed_categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w', encoding='utf-8') as file:
-                    #     json.dump(failed_categories, file,
-                    #               ensure_ascii=False, indent=4)
 
             if not p_ids and load_most_recent_if_failed:
                 logger.warning(f"Could not fetch product IDs from {main_url}, loading most recent saved ids.")

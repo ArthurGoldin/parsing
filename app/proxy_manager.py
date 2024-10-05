@@ -1,20 +1,22 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import logging
 import logging.config
 import json
 import requests
 import random
-from enum import Enum
 import time
-from datetime import datetime, timedelta, timezone
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.base import JobLookupError
-# from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import threading
 import atexit
 import ipaddress
 import socket
 import uuid
+import http.client
+import base64
+from enum import Enum
+from datetime import datetime, timedelta, timezone
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.base import JobLookupError
+# from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 
 # Configure logging
 try:
@@ -25,18 +27,32 @@ except Exception as e:
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
+
 # Initialize the scheduler with a SQLAlchemy job store (optional for persistence)
 # from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 # jobstores = {
 #     'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
 # }
 # scheduler = BackgroundScheduler(jobstores=jobstores)
-scheduler = BackgroundScheduler()
-scheduler.start()
 
 
-# Register a shutdown hook
-atexit.register(lambda: scheduler.shutdown())
+# scheduler = BackgroundScheduler()
+# try:
+#     scheduler.start()
+#     logger.info("Scheduler started successfully.")
+# except Exception as e:
+#     logger.error(f"Failed to start scheduler: {e}")
+#     raise
+
+# # Register a shutdown hook
+# def shutdown_scheduler():
+#     try:
+#         scheduler.shutdown(wait=False)
+#         logger.info("Scheduler shut down successfully via atexit.")
+#     except Exception as e:
+#         logger.error(f"Error shutting down scheduler: {e}")
+
+# atexit.register(shutdown_scheduler)
 
 
 class ProxyUnavailableError(Exception):
@@ -112,7 +128,8 @@ class Proxy:
         password: str,
         proxy_address: Dict[str, str],
         exp: int,
-        status: 'ProxyStatus'  # Assuming ProxyStatus is an enum or similar class
+        status: 'ProxyStatus',  # Assuming ProxyStatus is an enum or similar class
+        scheduler: BackgroundScheduler  # Reference to the ProxyManager's scheduler
     ):
         """
         Initializes a new instance of the Proxy class.
@@ -126,6 +143,7 @@ class Proxy:
         self._status_lock = threading.Lock()  # To handle concurrent status updates
         self._status = status  # Use _status as a backing attribute
         self._job_id = None  # To keep track of the scheduled job for reverting status
+        self.scheduler = scheduler  # Reference to the ProxyManager's scheduler
 
     @property
     def status(self) -> 'ProxyStatus':
@@ -184,7 +202,6 @@ class Proxy:
     #     Returns a status of the proxy
     #     """
     #     with self._status_lock:
-    #         return self.status
 
     def set_status(self, status: ProxyStatus) -> bool:
         """
@@ -225,7 +242,7 @@ class Proxy:
         # Cancel any existing scheduled job
         if self._job_id:
             try:
-                scheduler.remove_job(self._job_id)
+                self.scheduler.remove_job(self._job_id)
                 logger.debug(f"Existing job {self._job_id} for {self.ip} removed")
             except JobLookupError:
                 logger.warning(f"Job {self._job_id} not found for {self.ip}")
@@ -240,12 +257,12 @@ class Proxy:
 
         try:
             # Schedule the status to revert after 'duration' seconds
-            job = scheduler.add_job(
+            job = self.scheduler.add_job(
                 func=manager_reference.revert_proxy_status,
                 trigger='date',
                 run_date=run_time,
                 args=[self.ip],
-                id=f"revert_status_{self.ip}_{uuid.uuid4()}"
+                id=f"revert_status_{self.ip}_{str(uuid.uuid4())[0:4]}"
             )
             self._job_id = job.id
             logger.debug(f"Scheduled job {self._job_id} to revert status of {self.ip}")
@@ -295,13 +312,63 @@ class ProxyManager:
         self._manager_lock = threading.Lock()  # To handle concurrent access
         self.proxy_available = threading.Condition(self._manager_lock)
 
+        self.scheduler = BackgroundScheduler(timezone=timezone.utc)
+        try:
+            self.scheduler.start()
+            logger.info("Scheduler started successfully.")
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}")
+            raise
+
         # Schedule periodic expiration checks every 10 minutes
-        scheduler.add_job(
+        self.scheduler.add_job(
             self.check_expired_proxies,
             trigger='interval',
             minutes=check_exp_interval,
-            id="check_expired_proxies"
+            id=f"check_expired_proxies_{uuid.uuid4()}"
         )
+        atexit.register(lambda: self.shutdown_scheduler("atexit"))
+
+    def shutdown_scheduler(self, msg: str = "default"):
+        """
+        Shuts down the scheduler associated with this ProxyManager instance.
+        """
+        try:
+            self.scheduler.shutdown(wait=False)
+            logger.info(f"Scheduler shut down successfully via {msg}.")
+        except Exception as e:
+            if str(e).lower() != "scheduler is not running":
+                logger.error(f"Error shutting down scheduler: {e}")
+            else:
+                logger.debug(f"Can't shut down scheduler: {e}")
+
+    def __enter__(self):
+        """
+        Enter the runtime context related to this object.
+
+        Returns:
+            ProxyManager: The ProxyManager instance itself.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Exit the runtime context and shut down the scheduler.
+
+        Args:
+            exc_type: The exception type.
+            exc_val: The exception value.
+            exc_tb: The traceback.
+        """
+        self.shutdown_scheduler()
+
+    def monitor_jobs(self):
+        """
+        Monitors scheduled jobs and logs their status.
+        """
+        jobs = self.scheduler.get_jobs()
+        for job in jobs:
+            logger.debug(f"Job ID: {job.id}, Next Run Time: {job.next_run_time}")
 
     @classmethod
     def from_proxies(cls, proxies: List[Proxy]):
@@ -648,7 +715,8 @@ class ProxyManager:
                             password=proxy_dict["password"],
                             proxy_address=proxy_dict["proxy_address"],
                             exp=proxy_dict["exp"],
-                            status=status
+                            status=status,
+                            scheduler=self.scheduler
                         )
                         self.add_proxy(proxy)
                     except KeyError as e:
@@ -679,13 +747,13 @@ class ProxyManager:
         active_proxies = self.get_active_proxies()
         if active_proxies:
             selected_proxy = random.choice(active_proxies)
-            logger.info(f"Selected active proxy: {selected_proxy.ip}")
+            logger.debug(f"Selected active proxy: {selected_proxy.ip}")
             return selected_proxy
         else:
             logger.warning("No active proxies available!")
             return None
 
-    def get_available_proxy(self, timeout: Optional[int] = None) -> Optional[Proxy]:
+    def get_available_proxy(self, timeout: Optional[float] = None) -> Optional[Proxy]:
         """
         Retrieves a random active proxy. If no active proxies are available,
         checks for sleeping proxies and waits until one becomes active.
@@ -707,7 +775,7 @@ class ProxyManager:
 
             if active_proxies:
                 selected_proxy = random.choice(active_proxies)
-                logger.info(f"Selected active proxy: {selected_proxy.ip}")
+                logger.debug(f"Selected active proxy: {selected_proxy.ip}")
                 return selected_proxy
 
             # Check for sleeping proxies
@@ -730,7 +798,7 @@ class ProxyManager:
                     )
 
             else:
-                remaining_time = 100  # wait at most 100 seconds
+                remaining_time = 3600  # wait at most 100 seconds
 
             logger.info("No active proxies. Waiting for a sleeping proxy to become active...")
 
@@ -740,6 +808,40 @@ class ProxyManager:
                     self.proxy_available.wait(timeout=remaining_time)
                 else:
                     self.proxy_available.wait()
+
+    def make_connection(self, host: Optional[str], timeout: Optional[float] = 10) -> Tuple[http.client.HTTPSConnection, str]:
+        """
+        Make a connection to an available proxy and tunnel to the host
+        Args:
+            host (Optional[str]): The host the tunneling is crated to
+            timeout (Optional[int]): Maximum time in seconds to wait for an active proxy.
+                                     If None, waits indefinitely.
+        Returns:
+            http.client.HTTPSConnection: the http.client connection
+            str: An ip of the proxy
+        """
+
+        proxy = self.get_available_proxy(timeout=timeout)
+        if proxy is not None:
+            # Encode credentials for Proxy-Authorization header
+            credentials = f"{proxy.user}:{proxy.password}"
+            encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+
+            try:
+                # Set up a connection to the proxy
+                conn = http.client.HTTPSConnection(proxy.ip, proxy.ports['https'])
+                if host:
+                    # Set up a tunnel to the target host using the CONNECT method
+                    conn.set_tunnel(host, headers={'Proxy-Authorization': f'Basic {encoded_credentials}'})
+                    logger.debug(f"Connection to {host} established through proxy {proxy.ip}:{proxy.ports['https']}")
+                else:
+                    logger.debug(f"Connection to proxy established {proxy.ip}:{proxy.ports['https']}")
+
+                return conn, proxy.ip
+            except Exception as e:
+                logger.error(f"Proxy connection error: {e}")
+        else:
+            raise ProxyUnavailableError("Proxy not available")
 
     def add_proxy_from_api(self) -> None:
         """
@@ -811,6 +913,7 @@ if __name__ == "__main__":
     """
     # manager = ProxyManager.from_json(proxy_list)
     manager = ProxyManager.from_json_file('data/proxy/proxy.json')
+    manager1 = ProxyManager.from_json_file('data/proxy/proxy.json')
 
     for i in range(4):
         # Get a random active proxy
@@ -833,5 +936,7 @@ if __name__ == "__main__":
             # print(f"Final Status: {proxy}")
     time.sleep(5)
     print(f"Number of active proxies: {len(manager.get_active_proxies())}")
+
+    manager.shutdown_scheduler("checking")
     # Print all proxies
     # print(manager.proxies)

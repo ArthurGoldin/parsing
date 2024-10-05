@@ -1,16 +1,17 @@
+import logging
+import logging.config
+import time
+import root_categories
+import configparser
 import undetected_chromedriver as uc
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
-import logging
-import logging.config
-import time
 from bs4 import BeautifulSoup
-import root_categories
 from typing import List, Dict, Optional
-import configparser
 from save_and_load_data import save_to_file
+# from proxy_manager import ProxyManager
 
 # Configure logging
 try:
@@ -43,8 +44,18 @@ def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
     html = None
     driver = None
     attempt_count = 0
+    # proxy_manager = ProxyManager.from_json_file('data/proxy/proxy.json')
 
     while attempt_count < max_retries:
+        # proxy = proxy_manager.get_available_proxy()["proxy_address"]["https"]
+        # if proxy is not None:
+        #     auth_part, proxy_address = proxy.split("@")
+        #     username, password = auth_part.split(":")
+        #     proxy_host, proxy_port = proxy_address.split(":")
+        #     proxy_port = int(proxy_port)
+        #     credentials = f"{username}:{password}"
+        #     encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+
         options = uc.ChromeOptions()
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
@@ -182,7 +193,7 @@ def run_brands_crawler():
     main_categories = get_all_main_categories()
     logger.info(f"Beginning brands crawling for total {
                 len(main_categories)} categories.")
-    logger.info(main_categories)
+    logger.debug(main_categories)
 
     brands_by_category = get_brands_by_category(main_categories)
     # brands_by_category = get_brands_by_category([10020])
@@ -197,50 +208,3 @@ def run_brands_crawler():
 
 if __name__ == "__main__":
     run_brands_crawler()
-
-
-# def save_dict_to_file(category_dict: Dict[str, List[str]], directory: str = f"{data_dir}/brands", filename: str = "brands_by_category") -> None:
-    #     """
-    #     Save the dictionary to a file as JSON.
-
-    #     Args:
-    #         category_dict (Dict[str, List[str]]): The dictionary containing category data.
-    #         directory (str): The directory where the file should be saved.
-    #         filename (str): The base name of the file.
-
-    #     Returns:
-    #         None
-    #     """
-    #     if not os.path.exists(directory):
-    #         os.makedirs(directory)
-
-    #     with open(f"{directory}/{filename}_{datetime.now().strftime('%Y%m%d_%H%M')}.json", 'w', encoding='utf-8') as file:
-    #         json.dump(category_dict, file, ensure_ascii=False, indent=4)
-    #         logger.info(f"Saved {filename} to {directory}")
-
-    # def load_last_saved_dict(directory: str = f"{data_dir}/brands") -> Optional[Dict[str, List[str]]]:
-    #     """
-    #     Load the most recently saved dictionary from the specified directory.
-
-    #     Args:
-    #         directory (str): The directory to look for JSON files.
-
-    #     Returns:
-    #         Optional[Dict[str, List[str]]]: The loaded dictionary, or None if loading fails.
-    #     """
-    #     list_of_files = glob.glob(os.path.join(directory, '*.json'))
-
-    #     if not list_of_files:
-    #         logger.warning(f"No JSON files found in directory {directory}.")
-    #         return None
-
-    #     latest_file = max(list_of_files, key=os.path.getmtime)
-
-    #     try:
-    #         with open(latest_file, 'r', encoding='utf-8') as file:
-    #             category_dict = json.load(file)
-    #         logger.info(f"Loaded data from {latest_file}.")
-    #         return category_dict
-    #     except json.JSONDecodeError:
-    #         logger.error(f"Error decoding JSON from the file {latest_file}.")
-    #         return None

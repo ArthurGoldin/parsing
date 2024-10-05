@@ -84,7 +84,7 @@ root_categories_req_url = get_config('urls', 'root_categories_req_url')
 product_api_url = get_config('urls', 'product_api_url')
 
 
-def run_system_check(host_name=""):
+def run_system_check(host_name="localhost"):
     """
     Checks all modules.
     """
