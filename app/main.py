@@ -45,22 +45,22 @@ def fetch_data() -> None:
     """
     start_time = time.time()
     try:
-        # rc = root_categories.get_root_categories()
-        # if rc is None:
-        #     raise FileNotFoundError("Failed to load root-categories.")
+        rc = root_categories.get_root_categories()
+        if rc is None:
+            raise FileNotFoundError("Failed to load root-categories.")
 
-        # leaf_categories = root_categories.find_leaf_categories(rc)
-        # if not leaf_categories:
-        #     raise AttributeError("Leaf categories not found")
+        leaf_categories = root_categories.find_leaf_categories(rc)
+        if not leaf_categories:
+            raise AttributeError("Leaf categories not found")
 
-        # logger.info("Retrieving IDs...")
+        logger.info("Retrieving IDs...")
 
-        # leaf_categories = sorted(save_and_load_data.load_last_saved_json('data/category_ids'), key=lambda x: x['id'])
-        # p_ids = product_ids.fetch_product_ids_by_categories(leaf_categories)
-        # if p_ids is None:
-        #     raise FileNotFoundError("Failed to retrieve product IDs.")
+        leaf_categories = sorted(save_and_load_data.load_last_saved_json('data/category_ids'), key=lambda x: x['id'])
+        p_ids = product_ids.fetch_product_ids_by_categories(leaf_categories)
+        if p_ids is None:
+            raise FileNotFoundError("Failed to retrieve product IDs.")
 
-        p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
+        # p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
 
         logger.info('Parsing products...')
         products, failed_products_ids = product_parser.fetch_products(p_ids)

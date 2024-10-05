@@ -17,9 +17,6 @@ from save_and_load_data import load_last_saved_json, save_to_file
 from image_download import download_image
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
-
-import base64
-
 from token_manager import TokenManager
 
 # Configure logging
@@ -243,7 +240,7 @@ def fetch_products(p_ids: List[int],
     current_proxy_ip = None
     proxy_timeout = 2.5  # sleep time
     proxy_manager_timeout = 10  # waiting time limit for an available proxy
-    batch_size = 5
+    batch_size = 10
     proxy_ind = 0
 
     # Store data main structure
@@ -261,7 +258,7 @@ def fetch_products(p_ids: List[int],
 
     def make_connection(timeout: float = proxy_timeout if proxy_manager_timeout else 10,
                         pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
-                        put_to_sleep: bool = False,
+                        put_to_sleep: bool = True,
                         make_direct_connection: bool = use_direct_connection if use_direct_connection else False
                         ) -> Tuple[http.client.HTTPSConnection, str]:
         nonlocal conn
@@ -286,14 +283,15 @@ def fetch_products(p_ids: List[int],
             try:
                 logger.debug(f"Picking a proxy and establishing a connection")
                 conn, current_proxy_ip = proxy_manager.make_connection(host, pm_timeout)
+                return conn, current_proxy_ip
             except:
-                logger.warning(f"No proxy connection! Establishing direct connection to {host}")
-                conn = direct_connection()
-                current_proxy_ip = None
-        else:
-            logger.debug(f"Establishing direct connection to {host}")
-            conn = direct_connection()
-            current_proxy_ip = None
+                logger.warning(f"No proxy connection!")  # Establishing direct connection to {host}")
+                # conn = direct_connection()
+                # current_proxy_ip = None
+
+        logger.debug(f"Establishing direct connection to {host}")
+        conn = direct_connection()
+
         return conn, current_proxy_ip
 
     logger.info(f'Total products to parse {len(p_ids)}. Parsing...')
@@ -305,19 +303,6 @@ def fetch_products(p_ids: List[int],
         try:
             if proxy_ind % batch_size == 0:
                 conn, current_proxy_ip = make_connection()
-                # if conn:  # Close the previous connection before establishing a new one
-                #     logger.debug(f"Closing connection for batch {ind // batch_size}")
-                #     conn.close()
-                #     if current_proxy_ip:
-                #         logger.debug(f"Setting to sleep proxy {current_proxy_ip}")
-                #         proxy_manager.sleep_proxy(current_proxy_ip, proxy_timeout)
-                # logger.debug(f"Establishing connection for batch {ind // batch_size + 1}")
-                # headers['User-Agent'] = ua.random
-                # try:
-                #     conn, current_proxy_ip = proxy_manager.make_connection(host, proxy_manager_timeout)
-                # except:
-                #     logger.warning(f"No proxy connection! Establishing direct connection to {host}")
-                #     conn = http.client.HTTPSConnection(host)
 
             product_id = p_ids[ind]
             endpoint = f'{endpoint_base}{product_id}'
@@ -350,18 +335,22 @@ def fetch_products(p_ids: List[int],
                             error_429 = True
 
                     if error_429:
-                        logger.warning("429 (JSON errors): Blocked by the server due to too many requests.")
+                        retry_time = int(response.headers.get("Retry-After", 1))
+                        logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
                         # wait_with_backoff(request_attempts, backoff_factor)
-                        if request_attempts == 0:
-                            auth_token = token_manager.get_token_instance()
-                            headers['Authorization'] = f'Bearer {auth_token}'
+
+                        proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                        conn, current_proxy_ip = make_connection(timeout=retry_time)
+
                         request_attempts += 1
-                        if request_attempts > 1:
-                            retry_time = int(response.headers.get("Retry-After", 1))
-                            proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                            conn, current_proxy_ip = make_connection(timeout=retry_time)
-                        else:
-                            conn, current_proxy_ip = make_connection()
+
+                        # if request_attempts > 1:
+                        #     # retry_time = int(response.headers.get("Retry-After", 1))
+                        #     proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                        #     conn, current_proxy_ip = make_connection(timeout=retry_time)
+                        # else:
+                        #     conn, current_proxy_ip = make_connection()
+
                         continue
 
                 data, errors = parse_product(json_data, brands_by_category)
@@ -385,6 +374,7 @@ def fetch_products(p_ids: List[int],
                 proxy_manager_timeout = 10
                 proxy_ind += 1
                 ind += 1
+
                 if ind % batch_size == 0:
                     logger.debug(f"Processed {ind} products.")
                 if ind % 100 == 0:
@@ -408,17 +398,22 @@ def fetch_products(p_ids: List[int],
                 else:
                     conn, current_proxy_ip = make_connection(put_to_sleep=False)
 
-            elif response.status == 429:
+            elif response.status == 429:  # need to avoid this
                 retry_time = int(response.headers.get("Retry-After", 1))
-                logger.warning("429: Blocked by the server due to too many requests.")
+                logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
                 # wait_with_backoff(request_attempts, backoff_factor)
                 request_attempts += 1
-                if request_attempts > 1:
-                    retry_time = int(response.headers.get("Retry-After", 1))
-                    proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                    conn, current_proxy_ip = make_connection(timeout=retry_time)
-                else:
-                    conn, current_proxy_ip = make_connection()
+
+                proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                conn, current_proxy_ip = make_connection(timeout=(retry_time))
+
+                # if request_attempts > 1:
+                #     # retry_time = int(response.headers.get("Retry-After", 1))
+                #     proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                #     conn, current_proxy_ip = make_connection(timeout=(retry_time / 2))
+                # else:
+                #     conn, current_proxy_ip = make_connection()
+
                 continue
             else:
                 raise ValueError(f"Bad response status on a product API: {
@@ -433,10 +428,10 @@ def fetch_products(p_ids: List[int],
                 data_list = []
             logger.error(f'Failed to receive data from a product API: {e}')
             break
-        finally:
-            proxy_manager.shutdown_scheduler()
-            if conn is not None:
-                conn.close()
+
+    proxy_manager.shutdown_scheduler()
+    if conn is not None:
+        conn.close()
 
     if data_list:
         total_data_list.extend(data_list)

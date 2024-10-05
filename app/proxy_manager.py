@@ -254,7 +254,6 @@ class Proxy:
 
         # Calculate the run_time as a datetime object
         run_time = datetime.now(timezone.utc) + timedelta(seconds=duration)
-
         try:
             # Schedule the status to revert after 'duration' seconds
             job = self.scheduler.add_job(
@@ -913,7 +912,7 @@ if __name__ == "__main__":
     """
     # manager = ProxyManager.from_json(proxy_list)
     manager = ProxyManager.from_json_file('data/proxy/proxy.json')
-    manager1 = ProxyManager.from_json_file('data/proxy/proxy.json')
+    # manager1 = ProxyManager.from_json_file('data/proxy/proxy.json')
 
     for i in range(4):
         # Get a random active proxy

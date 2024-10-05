@@ -285,18 +285,21 @@ def get_product_ids_by_category(token_manager: TokenManager,
                                 error_429 = True
 
                         if error_429:
-                            logger.warning("429: Blocked by the server due to too many requests.")
+                            retry_time = int(response.headers.get("Retry-After", 1))
+                            logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
                             status = 429
-                            if request_attempts == 0:
-                                auth_token = token_manager.get_token_instance()
-                                headers['Authorization'] = f'Bearer {auth_token}'
+
+                            proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                            conn, current_proxy_ip = make_connection(timeout=retry_time)
+
                             request_attempts += 1
-                            if request_attempts > 1:
-                                retry_time = int(response.headers.get("Retry-After", 1))
-                                proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                                conn, current_proxy_ip = make_connection(timeout=retry_time)
-                            else:
-                                conn, current_proxy_ip = make_connection()
+                            # if request_attempts > 1:
+                            #     # retry_time = int(response.headers.get("Retry-After", 1))
+                            #     proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                            #     conn, current_proxy_ip = make_connection(timeout=retry_time)
+                            # else:
+                            #     conn, current_proxy_ip = make_connection()
+
                             # conn.close()
                             # wait_with_backoff(request_attempts, backoff_factor)
                             # if request_attempts == 0:
@@ -366,16 +369,23 @@ def get_product_ids_by_category(token_manager: TokenManager,
 
                 elif response.status == 429:  # too many requests
                     retry_time = int(response.headers.get("Retry-After", 1))
-                    logger.warning("429: Blocked by the server due to too many requests.")
+                    logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
                     # wait_with_backoff(request_attempts, backoff_factor)
+
+                    proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                    conn, current_proxy_ip = make_connection(timeout=retry_time)
+
                     request_attempts += 1
-                    if request_attempts > 1:
-                        retry_time = int(response.headers.get("Retry-After", 1))
-                        proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                        conn, current_proxy_ip = make_connection(timeout=retry_time)
-                    else:
-                        conn, current_proxy_ip = make_connection()
+
+                    # if request_attempts > 1:
+                    #     # retry_time = int(response.headers.get("Retry-After", 1))
+                    #     proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                    #     conn, current_proxy_ip = make_connection(timeout=retry_time)
+                    # else:
+                    #     conn, current_proxy_ip = make_connection()
+
                     continue
+
                     # # Server blocking due to multiple requests
                     # logger.info("429: Blocked by a server due to too many requests.")
                     # headers['User-Agent'] = ua.random
