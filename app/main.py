@@ -11,10 +11,12 @@ import sys
 from typing import List, Any
 
 import root_categories
-import product_ids
-import product_parser
-import save_and_load_data
+# import product_ids
+# import product_parser
+# import save_and_load_data
 import configparser
+from ids_fetcher import IdsFetcher
+from product_fetcher import ProductFetcher
 
 # Configure logging
 try:
@@ -55,17 +57,20 @@ def fetch_data() -> None:
 
         logger.info("Retrieving IDs...")
 
-        leaf_categories = sorted(save_and_load_data.load_last_saved_json('data/category_ids'), key=lambda x: x['id'])
-        p_ids = product_ids.fetch_product_ids_by_categories(leaf_categories)
+        # # leaf_categories = sorted(save_and_load_data.load_last_saved_json('data/category_ids'), key=lambda x: x['id'])
+        # leaf_categories = save_and_load_data.load_last_saved_json('data/category_ids')
+        # p_ids = product_ids.fetch_product_ids_by_categories(leaf_categories)
+        ids_fetcher = IdsFetcher()
+        p_ids = ids_fetcher.run(leaf_categories)
         if p_ids is None:
             raise FileNotFoundError("Failed to retrieve product IDs.")
-
         # p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
 
         logger.info('Parsing products...')
-        products, failed_products_ids = product_parser.fetch_products(p_ids)
+        product_fetcher = ProductFetcher()
+        products, failed_products_ids, status = product_fetcher.run(p_ids)
+        # products, failed_products_ids, status = product_parser.fetch_products(p_ids)
         logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
-        pass
 
     except Exception as e:
         logger.error(f"Could not fetch data: {e}. Exiting...")

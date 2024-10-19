@@ -58,7 +58,10 @@ except Exception as e:
 class ProxyUnavailableError(Exception):
     """Exception raised when no proxies are available within the specified timeout."""
 
-    def __init__(self, message: str = "No proxies available within the specified timeout.", timeout: Optional[int] = None, available_proxies: Optional[List['Proxy']] = None):
+    def __init__(self,
+                 message: str = "No proxies available within the specified timeout.",
+                 timeout: Optional[int] = None,
+                 available_proxies: Optional[List['Proxy']] = None):
         """
         Initializes the ProxyUnavailableError.
 
@@ -470,65 +473,70 @@ class ProxyManager:
         """
         required_keys = {"ip", "ports", "user", "password", "proxy_address", "exp", "status"}
 
+        dict_filtered = {key: (value if key != 'password' else '****') for key, value in proxy_dict.items()}
+
         # Check for missing keys
         if not required_keys.issubset(proxy_dict.keys()):
             missing = required_keys - proxy_dict.keys()
-            logger.error(f"Validation Error: Missing keys {missing} in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: Missing keys {missing} in proxy data: {dict_filtered}")
             return False
 
         # Validate IP address
         try:
             ipaddress.ip_address(proxy_dict["ip"])
         except ValueError:
-            logger.error(f"Validation Error: Invalid IP address '{proxy_dict['ip']}' in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: Invalid IP address '{proxy_dict['ip']}' in proxy data: {dict_filtered}")
             return False
 
         # Validate ports
         ports = proxy_dict["ports"]
         if not isinstance(ports, dict):
-            logger.error(f"Validation Error: 'ports' should be a dictionary in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: 'ports' should be a dictionary in proxy data: {dict_filtered}")
             return False
         for protocol in ["http", "https"]:
             if protocol not in ports:
-                logger.error(f"Validation Error: Missing '{protocol}' port in proxy data: {proxy_dict}")
+                logger.error(f"Validation Error: Missing '{protocol}' port in proxy data: {dict_filtered}")
                 return False
             port = ports[protocol]
             if not isinstance(port, int) or not (1 <= port <= 65535):
-                logger.error(f"Validation Error: Invalid port '{port}' for protocol '{protocol}' in proxy data: {proxy_dict}")
+                logger.error(f"Validation Error: Invalid port '{port}' for protocol '{protocol}' in proxy data: {dict_filtered}")
                 return False
 
         # Validate user and password
         if not isinstance(proxy_dict["user"], str) or not proxy_dict["user"]:
-            logger.error(f"Validation Error: Invalid or empty 'user' in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: Invalid or empty 'user' in proxy data: {dict_filtered}")
             return False
-        if not isinstance(proxy_dict["password"], str) or not proxy_dict["password"]:
-            logger.error(f"Validation Error: Invalid or empty 'password' in proxy data: {proxy_dict}")
+        if not isinstance(proxy_dict["password"], str):
+            logger.error(f"Validation Error: Invalid 'password' in proxy data: {dict_filtered}")
             return False
+        if not proxy_dict["password"]:
+            logger.warning(f"Password not provided")
+            proxy_dict["password"] = ""
 
         # Validate proxy_address
         proxy_address = proxy_dict["proxy_address"]
         if not isinstance(proxy_address, dict):
-            logger.error(f"Validation Error: 'proxy_address' should be a dictionary in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: 'proxy_address' should be a dictionary in proxy data: {dict_filtered}")
             return False
         for protocol in ["http", "https"]:
             if protocol not in proxy_address:
-                logger.error(f"Validation Error: Missing '{protocol}' proxy_address in proxy data: {proxy_dict}")
+                logger.error(f"Validation Error: Missing '{protocol}' proxy_address in proxy data: {dict_filtered}")
                 return False
             address = proxy_address[protocol]
             if not isinstance(address, str) or not ProxyManager.validate_proxy_address(address):
-                logger.error(f"Validation Error: Invalid proxy_address '{address}' for protocol '{protocol}' in proxy data: {proxy_dict}")
+                logger.error(f"Validation Error: Invalid proxy_address '{address}' for protocol '{protocol}' in proxy data: {dict_filtered}")
                 return False
 
         # Validate expiration time
         exp = proxy_dict["exp"]
         if not isinstance(exp, (int, float)) or exp <= time.time():
-            logger.error(f"Validation Error: Invalid or past 'exp' timestamp '{exp}' in proxy data: {proxy_dict}")
+            logger.error(f"Validation Error: Invalid or past 'exp' timestamp '{exp}' in proxy data: {dict_filtered}")
             return False
 
         # Validate status
         status_str = proxy_dict["status"].upper()
         if status_str not in ProxyStatus.__members__:
-            logger.warning(f"Validation Warning: Unknown status '{status_str}' in proxy data: {proxy_dict}. Setting to UNDEFINED.")
+            logger.warning(f"Validation Warning: Unknown status '{status_str}' in proxy data: {dict_filtered}. Setting to UNDEFINED.")
             # The ProxyStatus Enum will handle this by setting it to UNDEFINED
 
         # All validations passed

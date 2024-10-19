@@ -12,7 +12,17 @@ except Exception as e:
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
-def set_query_variables(data: dict, category_id: str, offset: int = 0, limit: int = 1, sort: str = "BY_RELEVANCE_DESC", showAdultContent: str = "TRUE", filters: list = [], correctQuery: bool = False, getFastCategories: bool = True, fastCategoriesLevelOffset: int = 2, getPromotionItems: bool = True) -> None:
+def set_query_variables(data: dict,
+                        category_id: str,
+                        offset: int = 0,
+                        limit: int = 1,
+                        sort: str = "BY_RELEVANCE_DESC",
+                        showAdultContent: str = "TRUE",
+                        filters: list = [],
+                        correctQuery: bool = False,
+                        getFastCategories: bool = True,
+                        fastCategoriesLevelOffset: int = 2,
+                        getPromotionItems: bool = True) -> None:
     if filters is None:
         filters = []
 

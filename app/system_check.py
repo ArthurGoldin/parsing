@@ -7,12 +7,15 @@ from typing import List, Any
 import argparse
 
 import root_categories
-import product_ids
-import product_parser
+# import product_ids
+# import product_parser
 from save_and_load_data import save_to_file, load_json
 import configparser
 from token_manager import TokenManager
 import send_data_to_db
+
+from ids_fetcher import IdsFetcher
+from product_fetcher import ProductFetcher
 
 # Configure logging
 try:
@@ -68,7 +71,7 @@ validate_config()
 data_dir = get_config('storage', 'data_directory')
 brands_dir = get_config('storage', 'brands_sub_dir')
 category_ids_dir = get_config('storage', 'category_ids_sub_dir')
-check_dir = get_config('storage', 'check_subdir')
+check_dir = get_config('storage', 'check_sub_dir')
 failed_categories_dir = get_config('storage', 'failed_categories_sub_dir')
 images_dir = get_config('storage', 'images_sub_dir')
 product_ids_dir = get_config('storage', 'product_ids_sub_dir')
@@ -136,6 +139,7 @@ def run_system_check(host_name="localhost"):
 
     try:
         logger.info('Checking product_ids...')
+        product_ids = IdsFetcher()
         p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[0]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
         if p_ids is None:
             res_stats["product_ids"] = "FAILED"
@@ -148,7 +152,8 @@ def run_system_check(host_name="localhost"):
 
     try:
         logger.info('Checking product_parser...')
-        products = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
+        product_parser = ProductFetcher()
+        products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
         if products is None:
             res_stats["product_parser"] = "FAILED"
         else:
