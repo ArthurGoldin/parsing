@@ -81,6 +81,7 @@ def fetch_data() -> None:
 
 if __name__ == "__main__":
     try:
+        pass
         fetch_data()
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->main: {e}")

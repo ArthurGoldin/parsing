@@ -7,7 +7,7 @@ import json
 import time
 import uuid
 import http.client
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from token_manager import TokenManager
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file, load_last_saved_json
@@ -15,14 +15,53 @@ from proxy_manager import ProxyManager
 
 
 class IdsFetcher:
+    """
+    A class to fetch product IDs from various categories using a GraphQL API.
+
+    Attributes:
+        config (configparser.ConfigParser): Configuration parser.
+        logger (logging.Logger): Logger instance.
+        data_dir (str): Directory for storing data.
+        product_ids_dir (str): Sub-directory for product IDs.
+        failed_categories_dir (str): Sub-directory for failed categories.
+        category_ids_dir (str): Sub-directory for category IDs.
+        proxy_dir (str): Directory for proxy configurations.
+        main_url (str): Main URL of the platform.
+        graphql_url (str): GraphQL API URL for fetching product IDs.
+        offset_limit (int): Maximum offset limit for pagination.
+        use_direct_connection (bool): Flag to use direct connection without proxies.
+        proxy_timeout (float): Timeout for proxy connections.
+        proxy_manager_timeout (int): Timeout for the proxy manager.
+        batch_size (int): Number of requests to batch.
+        token_manager (Optional[TokenManager]): Manager for handling tokens.
+        proxy_manager (Optional[ProxyManager]): Manager for handling proxies.
+        auth_token (Optional[str]): Authorization token.
+        ua (UserAgent): User agent generator.
+        headers (Dict[str, str]): HTTP headers for requests.
+        payload_json (Dict[str, Any]): Payload for GraphQL queries.
+        query_sort_types (List[str]): List of sorting types for queries.
+    """
+
     def __init__(self,
                  config_path: str = 'configs/app.conf',
                  logging_path: str = 'configs/logging.conf',
-                 offset_limit: int = None,
-                 use_direct_connection: bool = None,
-                 proxy_timeout: float = None,
-                 proxy_manager_timeout: int = None,
-                 batch_size: int = None):
+                 offset_limit: Optional[int] = None,
+                 use_direct_connection: Optional[bool] = None,
+                 proxy_timeout: Optional[float] = None,
+                 proxy_manager_timeout: Optional[int] = None,
+                 batch_size: Optional[int] = None) -> None:
+        """
+        Initialize the IdsFetcher with configuration and logging.
+
+        Args:
+            config_path (str, optional): Path to the configuration file. Defaults to 'configs/app.conf'.
+            logging_path (str, optional): Path to the logging configuration file. Defaults to 'configs/logging.conf'.
+            offset_limit (Optional[int], optional): Maximum offset limit for pagination. Defaults to None.
+            use_direct_connection (Optional[bool], optional): Whether to use direct connection without proxies. Defaults to None.
+            proxy_timeout (Optional[float], optional): Timeout for proxy connections. Defaults to None.
+            proxy_manager_timeout (Optional[int], optional): Timeout for the proxy manager. Defaults to None.
+            batch_size (Optional[int], optional): Number of requests to batch. Defaults to None.
+        """
         # Configure logging
         try:
             logging.config.fileConfig(logging_path)
@@ -46,38 +85,43 @@ class IdsFetcher:
         self.main_url = self.config.get('urls', 'main_url')
         self.graphql_url = self.config.get('urls', 'graphql_url')
 
-        # Fetching alg parameters
-        self.offset_limit = offset_limit if offset_limit else int(self.config.get('ids_fetching', 'offset_limit'))
-        self.use_direct_connection = use_direct_connection if use_direct_connection else self.config.getboolean('ids_fetching', 'use_direct_connection')
-        self.proxy_timeout = proxy_timeout if proxy_timeout else float(self.config.get('ids_fetching', 'proxy_timeout'))
-        self.proxy_manager_timeout = proxy_manager_timeout if proxy_manager_timeout else int(self.config.get('ids_fetching', 'proxy_manager_timeout'))
-        self.batch_size = batch_size if batch_size else int(self.config.get('ids_fetching', 'batch_size'))
+        # Fetching algorithm parameters
+        self.offset_limit = offset_limit if offset_limit is not None else int(self.config.get('ids_fetching', 'offset_limit'))
+        self.use_direct_connection = use_direct_connection if use_direct_connection is not None else \
+            self.config.getboolean('ids_fetching', 'use_direct_connection')
+        self.proxy_timeout = proxy_timeout if proxy_timeout is not None else float(self.config.get('ids_fetching', 'proxy_timeout'))
+        self.proxy_manager_timeout = proxy_manager_timeout if proxy_manager_timeout is not None else int(self.config.get('ids_fetching', 'proxy_manager_timeout'))
+        self.batch_size = batch_size if batch_size is not None else int(self.config.get('ids_fetching', 'batch_size'))
+
+        self.conn = None
+        self.current_proxy_ip = None
+        self.request_counter = 0  # Total number of requests
 
         # Managers
-        self.token_manager = None
-        self.proxy_manager = None
-        self.auth_token = None
+        self.token_manager: Optional[TokenManager] = None
+        self.proxy_manager: Optional[ProxyManager] = None
+        self.auth_token: Optional[str] = None
 
         self.ua = UserAgent()
 
-        self.headers = {
+        self.headers: Dict[str, str] = {
             'Accept': '*/*',
             'Accept-Language': 'ru-RU',
             'apollographql-client-name': 'web-customers',
             'apollographql-client-version': '1.25.2',
-            'Authorization': f'Bearer',
+            'Authorization': 'Bearer',
             'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
             'Content-Type': 'application/json',
-            'Origin': f'{self.main_url}',
+            'Origin': self.main_url,
             'Priority': 'u=1, i',
-            'Referer': f'{self.main_url}',
+            'Referer': self.main_url,
             'sec-fetch-site': 'same-site',
             'sentry-trace': str(uuid.uuid4()),
             'User-Agent': self.ua.random,
             'x-iid': str(uuid.uuid4())
         }
 
-        self.payload_json = {
+        self.payload_json: Dict[str, Any] = {
             "operationName": "getMakeSearch",
             "variables": {
                 "queryInput": {
@@ -118,7 +162,8 @@ class IdsFetcher:
             }
             """
         }
-        self.query_sort_types = [
+
+        self.query_sort_types: List[str] = [
             'BY_RELEVANCE_DESC',
             'BY_PRICE_ASC',
             'BY_PRICE_DESC',
@@ -127,7 +172,15 @@ class IdsFetcher:
             'BY_DATE_ADDED_DESC'
         ]
 
-    def initialize_managers(self, **kwargs):
+    def initialize_managers(self, **kwargs: Any) -> None:
+        """
+        Initialize the TokenManager and ProxyManager if they are not already initialized.
+
+        Keyword Args:
+            url (str, optional): URL for the TokenManager. Defaults to self.main_url.
+            token_retries (int, optional): Maximum retries for the TokenManager. Defaults to 5.
+            save_token (bool, optional): Whether to save the token. Defaults to False.
+        """
         if not self.token_manager:
             self.logger.debug("Initializing TokenManager in IdsFetcher")
             self.token_manager = TokenManager(
@@ -173,7 +226,7 @@ class IdsFetcher:
         Returns:
             List[int]: List of product IDs.
         """
-        product_ids = []
+        product_ids: List[int] = []
         data = json_data.get("data")
 
         if not data:
@@ -215,23 +268,22 @@ class IdsFetcher:
                                     request_retries: int = 10,
                                     backoff_factor: int = 1,
                                     save_data: bool = True,
-                                    save_by_category: bool = False,
-                                    ) -> Tuple[List[int], int]:
+                                    save_by_category: bool = False) -> Tuple[List[int], int]:
         """
         Fetch product IDs by category with pagination and retries.
 
         Args:
             category_id (int): The category ID.
-            amount (int): The total amount of products to fetch.
-            page_limit (int, optional): The limit of products per page.
-            request_retries (int, optional): Number of retries for the request.
-            backoff_factor (int, optional): Backoff factor for retries.
-            save_data (bool, optional): Whether to save the fetched IDs to a CSV file.
+            amount (int, optional): The total amount of products to fetch. Defaults to 0.
+            page_limit (int, optional): The limit of products per page. Defaults to 100.
+            request_retries (int, optional): Number of retries for the request. Defaults to 10.
+            backoff_factor (int, optional): Backoff factor for retries. Defaults to 1.
+            save_data (bool, optional): Whether to save the fetched IDs to a file. Defaults to True.
+            save_by_category (bool, optional): Whether to save IDs categorized by category. Defaults to False.
 
         Returns:
             Tuple[List[int], int]: A tuple containing the list of product IDs and the status code.
         """
-
         self.initialize_managers()
 
         if self.auth_token is None:
@@ -247,37 +299,51 @@ class IdsFetcher:
 
         self.payload_json["variables"]["queryInput"]["pagination"]["limit"] = page_limit
 
-        # offset_limit = self.offset_limit
-        # use_direct_connection = self.use_direct_connection
-        # batch_size = self.batch_size
         proxy_timeout = self.proxy_timeout
         proxy_manager_timeout = self.proxy_manager_timeout
 
         query_sort_ind = 0
         items_offset = 0
-        data_list = []
-        prev_data = []
+        data_list: List[int] = []
+        prev_data: List[int] = []
         request_attempts = 0
         done = False
-        status = None
+        status: Optional[int] = None
 
-        conn = None
-        current_proxy_ip = None
-        ind = 0
-        proxy_ind = 0
+        # conn: Optional[http.client.HTTPSConnection] = None
+        # current_proxy_ip: Optional[str] = None
+        # ind = 0
+        proxy_ind = self.request_counter
 
         def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
+            """
+            Wait for a certain period based on the backoff factor and the number of request attempts.
+
+            Args:
+                request_attempts (int): The current number of request attempts.
+                backoff_factor (float): The backoff factor to calculate wait time.
+            """
             self.logger.info(f"Server rejected. Attempt number {request_attempts}")
             wait_time = backoff_factor * (2 ** request_attempts)
             self.logger.info(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 
-        def make_connection(timeout: float = proxy_timeout if proxy_timeout else 10,
+        def make_connection(timeout: float = proxy_timeout if proxy_timeout else 2.5,
                             pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
-                            put_to_sleep: bool = False
-                            ) -> Tuple[http.client.HTTPSConnection, str]:
-            nonlocal conn
-            nonlocal current_proxy_ip
+                            put_to_sleep: bool = True):  # -> Tuple[http.client.HTTPSConnection, Optional[str]]:
+            """
+            Establish a new HTTP connection, optionally using a proxy.
+
+            Args:
+                timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
+                pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
+                put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to False.
+
+            Returns:
+                Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
+            """
+            # nonlocal conn
+            # nonlocal current_proxy_ip
             nonlocal proxy_ind
 
             def direct_connection() -> http.client.HTTPSConnection:
@@ -286,40 +352,41 @@ class IdsFetcher:
                 return http.client.HTTPSConnection(host)
 
             if not self.use_direct_connection:
-                if conn is not None:  # Close the previous connection before establishing a new one
-                    self.logger.debug(f"Closing connection for batch {ind // self.batch_size}")
-                    conn.close()
-                    if current_proxy_ip and put_to_sleep:
-                        self.logger.debug(f"Setting to sleep proxy {current_proxy_ip}")
-                        self.proxy_manager.sleep_proxy(current_proxy_ip, timeout)
+                if self.conn is not None:  # Close the previous connection before establishing a new one
+                    self.logger.debug(f"Closing connection for batch {self.request_counter // self.batch_size}")
+                    self.conn.close()
+                    if self.current_proxy_ip and put_to_sleep:
+                        self.logger.debug(f"Setting to sleep proxy {self.current_proxy_ip}")
+                        self.proxy_manager.sleep_proxy(self.current_proxy_ip, timeout)
                         proxy_ind = 0
-                self.logger.debug(f"Establishing connection for batch {ind // self.batch_size + 1}")
+                self.logger.debug(f"Establishing connection for batch {self.request_counter // self.batch_size + 1}")
                 self.headers['User-Agent'] = self.ua.random
                 try:
-                    self.logger.debug(f"Picking a proxy and establishing a connection")
-                    conn, current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
-                except:
-                    self.logger.warning(f"No proxy connection! Establishing direct connection to {host}")
-                    conn = direct_connection()
-                    current_proxy_ip = None
+                    self.logger.debug("Picking a proxy and establishing a connection")
+                    self.conn, self.current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
+                except Exception:
+                    self.logger.warning("No proxy connection! Establishing direct connection to {host}")
+                    self.conn = direct_connection()
+                    self.current_proxy_ip = None
             else:
                 self.logger.debug(f"Establishing direct connection to {host}")
-                conn = direct_connection()
-                current_proxy_ip = None
-            return conn, current_proxy_ip
+                self.conn = direct_connection()
+                self.current_proxy_ip = None
 
         try:
             if proxy_ind % self.batch_size == 0:
-                conn, current_proxy_ip = make_connection()
+                # if self.request_counter % self.batch_size == 0:
+                # conn, current_proxy_ip = make_connection()
+                make_connection()
 
             while not done and request_attempts <= request_retries:
                 self.payload_json["variables"]["queryInput"]["categoryId"] = f"{category_id}"
                 self.payload_json["variables"]["queryInput"]["pagination"]["offset"] = items_offset
-                self.payload_json["variables"]["queryInput"]["sort"] = f"{self.query_sort_types[query_sort_ind]}"
+                self.payload_json["variables"]["queryInput"]["sort"] = self.query_sort_types[query_sort_ind]
 
                 try:
-                    conn.request("POST", endpoint, json.dumps(self.payload_json), headers=self.headers)
-                    response = conn.getresponse()
+                    self.conn.request("POST", endpoint, json.dumps(self.payload_json), headers=self.headers)
+                    response = self.conn.getresponse()
                     status = response.status
                     if response.status == 200:
                         response_data = response.read()
@@ -330,15 +397,13 @@ class IdsFetcher:
                         decoded_data = response_data.decode('utf-8')
 
                         if not decoded_data:
-                            raise ValueError(
-                                "Empty response data from graphql query")
+                            raise ValueError("Empty response data from GraphQL query")
 
                         json_data = json.loads(decoded_data)
 
                         # Check for errors in the response
                         if 'errors' in json_data:
-                            error_messages = [
-                                error.get('message', 'Unknown error') for error in json_data['errors']]
+                            error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                             error_429 = False
                             for error_message in error_messages:
                                 self.logger.warning(f'GraphQL Error: {error_message}')
@@ -351,21 +416,20 @@ class IdsFetcher:
                                 status = 429
 
                                 proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                                conn, current_proxy_ip = make_connection(timeout=retry_time)
+                                # conn, current_proxy_ip = make_connection(timeout=retry_time)
+                                make_connection(timeout=max(retry_time, self.proxy_timeout))
 
                                 request_attempts += 1
                                 continue
 
                         data = self.get_ids_from_json(json_data)
                         if amount == 0:
-                            amount = json_data.get("data", {}).get(
-                                "makeSearch", {}).get("total")
+                            amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
                         if len(data) > 0:
                             data_list.extend(data)
                         else:
                             done = True
-                            amount = json_data.get("data", {}).get(
-                                "makeSearch", {}).get("total")
+                            amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
 
                         self.logger.debug(f'Collected {len(data)} of total {len(data_list)} collected items in category {category_id}')
 
@@ -378,58 +442,60 @@ class IdsFetcher:
                             if query_sort_ind < len(self.query_sort_types) - 1:
                                 items_offset = 0
                                 query_sort_ind += 1
-                                self.logger.info(f"Reached the API offset limit of 10,000. Switching to sort type {self.query_sort_types[query_sort_ind]}")
-                                # add 10000 to prevent stopping (the amount is now irrelevant)
+                                self.logger.info(f"Reached the API offset limit of {self.offset_limit}. Switching to sort type {self.query_sort_types[query_sort_ind]}")
+                                # Add offset_limit to prevent stopping (the amount is now irrelevant)
                                 amount += self.offset_limit
                             else:
                                 done = True
 
                         prev_data = data
                         request_attempts = 0
-                        ind += 1
+                        # ind += 1
                         proxy_ind += 1
+                        self.request_counter += 1
 
-                    elif response.status == 401:  # authorization failed
+                        if proxy_ind % self.batch_size == 0:
+                            make_connection()
+
+                    elif response.status == 401:  # Authorization failed
                         self.logger.warning(f"{response.status}: Authorization failed during the GraphQL request; retrieving a new token...")
-                        # wait_with_backoff(request_attempts, backoff_factor)
                         self.auth_token = self.token_manager.get_token_instance()
                         self.headers['Authorization'] = f'Bearer {self.auth_token}'
                         request_attempts += 1
                         if request_attempts > 1:
-                            conn, current_proxy_ip = make_connection()
+                            # conn, current_proxy_ip = make_connection()
+                            make_connection()
                         else:
-                            conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                            # conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                            make_connection(put_to_sleep=False)
 
-                    elif response.status == 429:  # too many requests
+                    elif response.status == 429:  # Too many requests
                         retry_time = int(response.headers.get("Retry-After", 1))
                         self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
-                        # wait_with_backoff(request_attempts, backoff_factor)
 
                         proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                        conn, current_proxy_ip = make_connection(timeout=retry_time)
+                        # conn, current_proxy_ip = make_connection(timeout=retry_time)
+                        make_connection(timeout=max(retry_time, self.proxy_timeout))
 
                         request_attempts += 1
-
                         continue
                     else:
                         request_attempts += 1
                         if request_attempts > request_retries:
                             raise ValueError(f"Bad response status on a GraphQL query: {response.status}")
-                        self.logger.warning(f"Bad response status on a GraphQL query: {response.status}, retying...")
+                        self.logger.warning(f"Bad response status on a GraphQL query: {response.status}, retrying...")
                         wait_with_backoff(request_attempts, backoff_factor)
                 except Exception as e:
-                    self.logger.error(
-                        f'Failed to receive data from a GraphQl query: {e}')
+                    self.logger.error(f'Failed to receive data from a GraphQL query: {e}')
                     break
         except Exception as e:
-            self.logger.error(f"In get_products_id_by_category: {e}")
-        finally:
-            if conn is not None:
-                conn.close()
+            self.logger.error(f"In get_product_ids_by_category: {e}")
+        # finally:
+        #     if conn is not None:
+        #         conn.close()
 
         if len(data_list) != 0:
-            self.logger.info(f"Finished retrieving category ids. Total collected {
-                len(data_list)} out of {amount} in GraphQL in category {category_id}")
+            self.logger.info(f"Finished retrieving category ids. Total collected {len(data_list)} out of {amount} in GraphQL in category {category_id}")
             data_list = list(set(data_list))
             self.logger.info(f"Total unique ids: {len(data_list)} in category {category_id}, return status: {status}")
             if save_data:
@@ -446,13 +512,18 @@ class IdsFetcher:
                                         save_data: bool = True,
                                         load_most_recent_if_failed: bool = False,
                                         sort_result: bool = False,
-                                        **kwargs) -> List[int]:
+                                        **kwargs: Any) -> List[int]:
         """
         Fetch product IDs by categories and optionally save the fetched data.
 
         Args:
             categories (List[Dict[str, Any]]): List of categories to fetch product IDs from.
-            save_data (bool, optional): Whether to save the fetched data to a CSV file.
+            save_data (bool, optional): Whether to save the fetched data to a file. Defaults to True.
+            load_most_recent_if_failed (bool, optional): Whether to load the most recent saved IDs if fetching fails. Defaults to False.
+            sort_result (bool, optional): Whether to sort the resulting product IDs. Defaults to False.
+
+        Keyword Args:
+            Any additional keyword arguments.
 
         Returns:
             List[int]: List of fetched product IDs.
@@ -461,28 +532,37 @@ class IdsFetcher:
 
         self.initialize_managers(**kwargs)
         self.auth_token = self.token_manager.get_token_instance()
-        p_ids = []
+        p_ids: List[int] = []
         try:
             if self.auth_token is not None:
-                failed_categories = []
+                failed_categories: List[Dict[str, Any]] = []
                 for category in categories:
-                    category_ids, status = self.get_product_ids_by_category(category_id=category['id'], amount=category['productAmount'], save_data=save_data)
+                    category_ids, status = self.get_product_ids_by_category(
+                        category_id=category['id'],
+                        amount=category.get('productAmount', 0),
+                        save_data=save_data
+                    )
                     if len(category_ids) > 0:
                         p_ids.extend(category_ids)
                     if status != 200:
-                        failed_categories.append({"id": category['id'], "productAmount": category['productAmount'], "status": status})
+                        failed_categories.append({
+                            "id": category['id'],
+                            "productAmount": category.get('productAmount', 0),
+                            "status": status
+                        })
 
                 self.logger.info(f"Total {len(p_ids)} ids fetched.")
                 p_ids = list(set(p_ids))
                 self.logger.info(f"Total unique ids fetched: {len(p_ids)}")
-                self.logger.info(f'Total number of failed categories: {
-                    len(failed_categories)}')
+                self.logger.info(f"Total number of failed categories: {len(failed_categories)}")
                 if sort_result:
                     p_ids = sorted(p_ids)
                 if save_data:
                     if p_ids:
-                        save_to_file(p_ids, f"{self.product_ids_dir}_final", self.product_ids_dir, separate_folder=False)
+                        self.logger.info(f"Saving ids to {self.product_ids_dir}")
+                        save_to_file(p_ids, f"{self.product_ids_dir}_final", self.product_ids_dir, separate_folder=False, override_file=False)
                     if failed_categories:
+                        self.logger.info(f"Saving ids to {self.failed_categories_dir}")
                         save_to_file(failed_categories, 'failed_categories_ids', self.failed_categories_dir, separate_folder=False)
 
                 if not p_ids and load_most_recent_if_failed:
@@ -494,25 +574,54 @@ class IdsFetcher:
             self.logger.error(f"In 'fetch_product_ids_by_category': {e}")
         finally:
             if self.proxy_manager:
+                self.logger.debug(f"In {__file__}: Closing proxy_manager scheduler.")
                 self.proxy_manager.shutdown_scheduler()
+            if self.conn:
+                self.logger.debug(f"In {__file__}: Closing connection.")
+                self.conn.close()
+            if self.current_proxy_ip:
+                self.current_proxy_ip = None
 
         end_time = time.time()
         self.logger.info(f"Product ID's fetching execution time: {end_time - start_time:.2f} seconds")
         return p_ids
 
-    def run(self, categories: List[Dict[str, Any]], **kwargs):
+    def run(self, categories: List[Dict[str, Any]], **kwargs: Any) -> List[int]:
+        """
+        Start the product ID fetching process for the given categories.
+
+        Args:
+            categories (List[Dict[str, Any]]): List of categories to fetch product IDs from.
+
+        Keyword Args:
+            Any additional keyword arguments.
+
+        Returns:
+            List[int]: List of fetched product IDs.
+        """
         self.logger.info("Starting to fetch product IDs for the input categories...")
         try:
             return self.fetch_product_ids_by_categories(categories, **kwargs)
         except Exception as e:
             self.logger.error(f"In {__file__}->main: {e}")
+            return []
 
-    def load_categories(self, file_name: str = "", ind: int = 0) -> List[int]:
+    def load_categories(self, file_name: str = "", ind: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """
+        Load categories from a specified file starting from a given index.
+
+        Args:
+            file_name (str, optional): Name of the file to load categories from. Defaults to "".
+            ind (int, optional): Index to start loading from. Defaults to 0.
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: A list of categories or None if loading fails.
+        """
         categories = load_last_saved_json(directory=f'{self.data_dir}/{self.category_ids_dir}', file_name=file_name)
         if categories:
             return categories[ind:]
         else:
-            self.logger.error(f"No categories found in {self.data_dir}/{self.category_ids_dir}. Try running first 'root_categories.py.' ")
+            self.logger.error(f"No categories found in {self.data_dir}/{self.category_ids_dir}. Try running first 'root_categories.py.'")
             return None
 
 
@@ -521,7 +630,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Fetch product IDs by category.')
     parser.add_argument('categories', metavar='CATEGORY_ID', type=int, nargs='*',
-                        help='Category IDs or the path to category IDs to fetch product IDs from.')
+                        help='Category IDs to fetch product IDs from.')
     parser.add_argument('-s', '--save', action='store_true',
                         help='Save fetched product IDs to file.')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
@@ -532,23 +641,33 @@ if __name__ == "__main__":
                         const=0, help='Index in the categories list to start fetching from.')
     args = parser.parse_args()
 
+    categories: Optional[List[Dict[str, Any]]] = None
     if args.categories:
-        id_fetcher.logger.info("Received categories from a user.")
+        id_fetcher.logger.info("Received categories from user input.")
         categories = [{'id': cid, 'productAmount': 0} for cid in args.categories]
     elif args.load is not None:
         file_name = args.load
         if file_name:
-            id_fetcher.logger.info(f"Loading IDs from {file_name}")
+            id_fetcher.logger.info(f"Loading categories from {file_name}")
         else:
-            id_fetcher.logger.info("Loading IDs from most recent category IDs")
-        categories = id_fetcher.load_categories(file_name, args.index if args.index else 0)
-        id_fetcher.logger.info("Starting to fetch IDs from categories loaded")
+            id_fetcher.logger.info("Loading categories from most recent category IDs")
+        loaded_categories = id_fetcher.load_categories(file_name, args.index if args.index else 0)
+        if loaded_categories:
+            categories = loaded_categories
+            id_fetcher.logger.info("Starting to fetch IDs from loaded categories")
     else:
         id_fetcher.logger.error("No categories provided!")
-        id_fetcher.logger.info("Try using -l or --load to load most recent categories. Or type category IDs to fetch.")
+        id_fetcher.logger.info("Try using -l or --load to load most recent categories. Or provide category IDs to fetch.")
 
     if categories:
         try:
-            id_fetcher.run(categories, save_data=args.save, load_most_recent_if_failed=False, sort_result=args.sort)
+            fetched_ids = id_fetcher.run(
+                categories,
+                save_data=args.save,
+                load_most_recent_if_failed=False,
+                sort_result=args.sort
+            )
+            # Optionally, handle fetched_ids as needed
+            id_fetcher.logger.info(f"Fetched {len(fetched_ids)} unique product IDs.")
         except Exception as e:
             id_fetcher.logger.error(f"In {__file__}->main: {e}")

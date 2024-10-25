@@ -29,6 +29,7 @@ config.read('configs/app.conf')
 data_dir = config.get('storage', 'data_directory')
 rc_dir = config.get('storage', 'root_categories_sub_dir')
 lc_dir = config.get('storage', 'category_ids_sub_dir')
+proxy_dir = config.get('storage', 'proxy_dir')
 
 
 def combine_products_into_tree(category_tree: Dict[str, Any], products_by_category: Dict[str, Any]) -> Dict[str, Any]:
@@ -157,7 +158,7 @@ def get_root_categories(request_retries: int = 8,
 
     root_categories = None
     request_attempts = 0
-    proxy_manager = ProxyManager.from_json_file("data/proxy/proxy.json")
+    proxy_manager = ProxyManager.from_json_file(proxy_dir)
 
     def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
         """

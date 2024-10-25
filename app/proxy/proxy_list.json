@@ -1,0 +1,124 @@
+    {
+        "proxies": [
+            {
+                "ip": "193.28.183.223",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.223:8013",
+                    "https": "user210707:6qml5v@193.28.183.223:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.120",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.120:8013",
+                    "https": "user210707:6qml5v@193.28.183.120:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.238",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.238:8013",
+                    "https": "user210707:6qml5v@193.28.183.238:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.235",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.235:8013",
+                    "https": "user210707:6qml5v@193.28.183.235:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.234",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.234:8013",
+                    "https": "user210707:6qml5v@193.28.183.234:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.145",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.145:8013",
+                    "https": "user210707:6qml5v@193.28.183.145:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.189",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.189:8013",
+                    "https": "user210707:6qml5v@193.28.183.189:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            },
+            {
+                "ip": "193.28.183.167",
+                "ports": {
+                    "http": 8013,
+                    "https": 8013
+                },
+                "user": "user210707",
+                "password": "6qml5v",
+                "proxy_address": {
+                    "http": "user210707:6qml5v@193.28.183.167:8013",
+                    "https": "user210707:6qml5v@193.28.183.167:8013"
+                },
+                "exp": 1732303440,
+                "status": "ACTIVE"
+            }
+        ]
+    }

@@ -35,6 +35,15 @@
      python3 product_ids.py <category_id>
      ```
 
+3. If for some reason your Google Chrome is outdated, you'll get an error:
+
+   ```bash
+   Error in get_token_instance: Message: session not created: cannot connect to chrome at XXX.X.X.X:XXXXX
+   from session not created: This version of ChromeDriver only supports Chrome version YYY
+   ```
+
+   Update your Google Chrome by following the [instructions](https://support.google.com/chrome/answer/95414?hl=en&co=GENIE.Platform%3DDesktop).
+
 ## Docker Instructions
 
 1. Build the Docker image:

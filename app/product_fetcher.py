@@ -6,13 +6,13 @@ import logging.config
 import zlib
 import brotli
 from fake_useragent import UserAgent
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 import sys
 import re
 import argparse
 import configparser
 import uuid
-from typing import Tuple
+from datetime import datetime
 from save_and_load_data import load_last_saved_json, save_to_file
 from image_download import download_image
 from send_data_to_db import send_message
@@ -21,13 +21,49 @@ from token_manager import TokenManager
 
 
 class ProductFetcher:
+    """
+    A class to fetch and parse product information from a given API.
+
+    Attributes:
+        config (configparser.ConfigParser): Configuration parser.
+        logger (logging.Logger): Logger instance.
+        data_dir (str): Directory for storing data.
+        product_ids_dir (str): Sub-directory for product IDs.
+        products_dir (str): Sub-directory for products.
+        images_dir (str): Sub-directory for images.
+        main_url (str): Main URL of the platform.
+        product_api_url (str): API URL for fetching product data.
+        use_direct_connection (bool): Flag to use direct connection.
+        proxy_timeout (float): Timeout for proxy connections.
+        proxy_manager_timeout (int): Timeout for proxy manager.
+        batch_size (int): Number of products to fetch in a batch.
+        brands_by_category (Dict[str, Any]): Brands categorized by product categories.
+        token_manager (Optional[TokenManager]): Manager for handling tokens.
+        proxy_manager (Optional[ProxyManager]): Manager for handling proxies.
+        auth_token (Optional[str]): Authorization token.
+        ua (UserAgent): User agent generator.
+        headers (Dict[str, str]): HTTP headers for requests.
+    """
+
     def __init__(self,
                  config_path: str = 'configs/app.conf',
                  logging_path: str = 'configs/logging.conf',
-                 use_direct_connection: bool = None,
-                 proxy_timeout: float = None,
-                 proxy_manager_timeout: int = None,
-                 batch_size: int = None):
+                 use_direct_connection: Optional[bool] = None,
+                 proxy_timeout: Optional[float] = None,
+                 proxy_manager_timeout: Optional[int] = None,
+                 batch_size: Optional[int] = None,
+                 package_size: Optional[int] = None) -> None:
+        """
+        Initialize the ProductFetcher with configuration and logging.
+
+        Args:
+            config_path (str, optional): Path to the configuration file. Defaults to 'configs/app.conf'.
+            logging_path (str, optional): Path to the logging configuration file. Defaults to 'configs/logging.conf'.
+            use_direct_connection (Optional[bool], optional): Whether to use direct connection. Defaults to None.
+            proxy_timeout (Optional[float], optional): Timeout for proxy connections. Defaults to None.
+            proxy_manager_timeout (Optional[int], optional): Timeout for the proxy manager. Defaults to None.
+            batch_size (Optional[int], optional): Number of products to fetch in a batch. Defaults to None.
+        """
         # Configure logging
         try:
             logging.config.fileConfig(logging_path)
@@ -43,50 +79,65 @@ class ProductFetcher:
 
         # Initialize attributes
         self.data_dir = self.config.get('storage', 'data_directory')
-        # self.brands_dir = self.config.get('storage', 'brands_sub_dir')
         self.product_ids_dir = self.config.get('storage', 'product_ids_sub_dir')
         self.products_dir = self.config.get('storage', 'products_sub_dir')
         self.images_dir = self.config.get('storage', 'images_sub_dir')
+        self.proxy_dir = self.config.get('storage', 'proxy_dir')
 
         self.main_url = self.config.get('urls', 'main_url')
         self.product_api_url = self.config.get('urls', 'product_api_url')
 
-        # Fetching alg parameters
-        self.use_direct_connection = use_direct_connection if use_direct_connection else self.config.getboolean('prdoduct_fetching', 'use_direct_connection')
-        self.proxy_timeout = proxy_timeout if proxy_timeout else float(self.config.get('prdoduct_fetching', 'proxy_timeout'))
-        self.proxy_manager_timeout = proxy_manager_timeout if proxy_manager_timeout else int(self.config.get('prdoduct_fetching', 'proxy_manager_timeout'))
-        self.batch_size = batch_size if batch_size else int(self.config.get('prdoduct_fetching', 'batch_size'))
+        # Fetching algorithm parameters
+        self.use_direct_connection = use_direct_connection if use_direct_connection is not None else \
+            self.config.getboolean('product_fetching', 'use_direct_connection')
+        self.proxy_timeout = proxy_timeout if proxy_timeout is not None else \
+            float(self.config.get('product_fetching', 'proxy_timeout'))
+        self.proxy_manager_timeout = proxy_manager_timeout if proxy_manager_timeout is not None else \
+            int(self.config.get('product_fetching', 'proxy_manager_timeout'))
+        self.batch_size = batch_size if batch_size is not None else \
+            int(self.config.get('product_fetching', 'batch_size'))
+        self.package_size = package_size if package_size is not None else \
+            int(self.config.get('product_fetching', 'package_size'))
 
-        self.brands_by_category = load_last_saved_json(f'{self.data_dir}/{self.config.get('storage', 'brands_sub_dir')}')
+        self.brands_by_category = load_last_saved_json(
+            f'{self.data_dir}/{self.config.get("storage", "brands_sub_dir")}'
+        )
 
         # Managers
-        self.token_manager = None
-        self.proxy_manager = None
-        self.auth_token = None
+        self.token_manager: Optional[TokenManager] = None
+        self.proxy_manager: Optional[ProxyManager] = None
+        self.auth_token: Optional[str] = None
 
         self.ua = UserAgent()
 
-        self.headers = {
-            'authority': f'{self.product_api_url.split("//")[1].split('/')[0]}',
+        self.headers: Dict[str, str] = {
+            'authority': f'{self.product_api_url.split("//")[1].split("/")[0]}',
             'method': 'GET',
-            'path': f'{self.product_api_url.split('https://' + self.product_api_url.split("//")[1].split('/')[0])[1]}',
+            'path': f'{self.product_api_url.split("https://" + self.product_api_url.split("//")[1].split("/")[0])[1]}',
             'scheme': 'https',
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Accept-Language': 'ru-RU',
-            'Authorization': f'Bearer ',
+            'Authorization': 'Bearer ',
             'Content-Type': 'application/json',
-            'Origin': f'{self.main_url}',
+            'Origin': self.main_url,
             'Priority': 'u=1, i',
-            'Referer': f'{self.main_url}',
+            'Referer': self.main_url,
             'Sec-Fetch-Site': 'same-site',
             'Sentry-Trace': str(uuid.uuid4()),
-            'User-Agent': self.ua.random,  # if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'User-Agent': self.ua.random,
             'X-Iid': str(uuid.uuid4()),
-            # 'Connection': 'keep-alive'
         }
 
-    def initialize_managers(self, **kwargs):
+    def initialize_managers(self, **kwargs: Any) -> None:
+        """
+        Initialize the TokenManager and ProxyManager if they are not already initialized.
+
+        Keyword Args:
+            url (str, optional): URL for the TokenManager. Defaults to self.main_url.
+            token_retries (int, optional): Maximum retries for the TokenManager. Defaults to 5.
+            save_token (bool, optional): Whether to save the token. Defaults to False.
+        """
         if not self.token_manager:
             self.logger.debug("Initializing TokenManager in ProductFetcher")
             self.token_manager = TokenManager(
@@ -122,7 +173,7 @@ class ProductFetcher:
         else:
             return response_data
 
-    def parse_product(self, json_data: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str] | str]:
+    def parse_product(self, json_data: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str] | str]]:
         """
         Parse product information from the given JSON data.
 
@@ -130,40 +181,43 @@ class ProductFetcher:
             json_data (Dict[str, Any]): The JSON data.
 
         Returns:
-            Tuple[Dict[str, Any], Dict[str, str] | str]: The parsed product data and any error messages.
+            Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str] | str]]:
+                A tuple containing the parsed product data and any error messages.
         """
-        def find_oldest_ancestor(category_data):
+        def find_oldest_ancestor(category_data: Dict[str, Any]) -> Any:
             current_category = category_data['category']
             while current_category['parent'] is not None:
                 current_category = current_category['parent']
             return current_category['id']
 
-        def find_keywords_in_title(title, keywords):
+        def find_keywords_in_title(title: Optional[str], keywords: List[str]) -> List[str]:
             matches = []
-            for keyword in keywords:
-                # Use regex to find full word match
-                if re.search(r'\b' + re.escape(keyword) + r'\b', title):
-                    matches.append(keyword)
+            if title:
+                for keyword in keywords:
+                    # Use regex to find full word match
+                    if re.search(r'\b' + re.escape(keyword) + r'\b', title):
+                        matches.append(keyword)
             return matches
 
-        def get_hierarchical_parents(category) -> Dict[str, Any]:
+        def get_hierarchical_parents(category: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             if not category or 'parent' not in category or category['parent'] is None:
                 return None
             parent = category['parent']
             return {
-                'id': parent.get('id', None),
-                'title': parent.get('title', None),
-                'productAmount': parent.get('productAmount', None),
+                'id': parent.get('id'),
+                'title': parent.get('title'),
+                'productAmount': parent.get('productAmount'),
                 'parent': get_hierarchical_parents(parent)
             }
 
         try:
-            if json_data['payload'] == None:
+            if json_data.get('payload') is None:
                 if 'errors' in json_data:
                     detailed_message = [error.get('detailMessage') for error in json_data['errors']]
-                    if detailed_message is not None:
+                    if detailed_message:
                         raise AttributeError(", ".join(detailed_message))
-                raise AttributeError(f"product not found")
+                raise AttributeError("product not found")
+
             payload = json_data.get('payload', {}).get('data', {})
             characteristic_data = payload.get('characteristics', [])
 
@@ -172,53 +226,55 @@ class ProductFetcher:
             if not payload:
                 raise ValueError("Payload or data is missing in the JSON file.")
 
-            if payload.get('category', {}).get('title', None).lower() == "Смартфоны Apple iPhone(iOS)".lower():
+            if payload.get('category', {}).get('title', '').lower() == "Смартфоны Apple iPhone(iOS)".lower():
                 brand = ["Apple"]
             else:
-                brand = find_keywords_in_title(payload.get('title', None), self.brands_by_category[f'{find_oldest_ancestor(payload)}']) if self.brands_by_category else ''
+                oldest_ancestor_id = find_oldest_ancestor(payload)
+                brand_keywords = self.brands_by_category.get(str(oldest_ancestor_id), []) if self.brands_by_category else []
+                brand = find_keywords_in_title(payload.get('title'), brand_keywords) if brand_keywords else []
 
-            # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None), payload.get('id', None), f'{data_dir}/{images_dir}')
+            # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
 
-            result = {
-                'id': payload.get('id', None),
-                'title': payload.get('title', None),
-                'titleUz': payload.get('localizableTitle', None).get('uz', None),
+            result: Dict[str, Any] = {
+                'id': payload.get('id'),
+                'title': payload.get('title'),
+                'titleUz': payload.get('localizableTitle', {}).get('uz'),
                 'brand': ', '.join(brand),
                 'category': {
-                    'id': payload.get('category', {}).get('id', None),
-                    'title': payload.get('category', {}).get('title', None),
-                    'productAmount': payload.get('category', {}).get('productAmount', None),
+                    'id': payload.get('category', {}).get('id'),
+                    'title': payload.get('category', {}).get('title'),
+                    'productAmount': payload.get('category', {}).get('productAmount'),
                     'parent': hierarchical_parents
                 },
-                'rating': payload.get('rating', None),
-                'reviewsAmount': payload.get('reviewsAmount', None),
-                'ordersAmount': payload.get('ordersAmount', None),
-                'totalAvailableAmount': payload.get('totalAvailableAmount', None),
-                'url': f'{self.main_url}/product/{payload.get("id", None)}',
+                'rating': payload.get('rating'),
+                'reviewsAmount': payload.get('reviewsAmount'),
+                'ordersAmount': payload.get('ordersAmount'),
+                'totalAvailableAmount': payload.get('totalAvailableAmount'),
+                'url': f'{self.main_url}/product/{payload.get("id")}',
                 # 'photo': image_path,
-                'photo': payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high', None),
+                'photo': payload.get('photos', [{}])[0].get('photo', {}).get('800', {}).get('high'),
                 'skuList': [{
                     'characteristics': [{
-                        'id': characteristic_data[char.get('charIndex', None)]['id'],
-                        'title': characteristic_data[char.get('charIndex', None)]['title'],
-                        'values': characteristic_data[char.get('charIndex', None)]['values'][char.get('valueIndex', None)]
+                        'id': characteristic_data[char.get('charIndex')]['id'],
+                        'title': characteristic_data[char.get('charIndex')]['title'],
+                        'values': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]
                     } for char in sku.get('characteristics', [])],
-                    'id': sku.get('id', None),
-                    'availableAmount': sku.get('availableAmount', None),
-                    'fullPrice': sku.get('fullPrice', None),
-                    'purchasePrice': sku.get('purchasePrice', None)
+                    'id': sku.get('id'),
+                    'availableAmount': sku.get('availableAmount'),
+                    'fullPrice': sku.get('fullPrice'),
+                    'purchasePrice': sku.get('purchasePrice')
                 } for sku in payload.get('skuList', [])],
                 'seller': [{
-                    'id': payload.get('seller', {}).get('id', None),
-                    'title': payload.get('seller', {}).get('title', None),
-                    'rating': payload.get('seller', {}).get('rating', None),
-                    'reviews': payload.get('seller', {}).get('reviews', None),
-                    'orders': payload.get('seller', {}).get('orders', None),
+                    'id': payload.get('seller', {}).get('id'),
+                    'title': payload.get('seller', {}).get('title'),
+                    'rating': payload.get('seller', {}).get('rating'),
+                    'reviews': payload.get('seller', {}).get('reviews'),
+                    'orders': payload.get('seller', {}).get('orders'),
                 }],
             }
 
             # Check for null values and add error messages if any
-            error_messages = {}
+            error_messages: Dict[str, str] = {}
             for key, value in result.items():
                 if value is None:
                     error_messages[key] = f"{key} is missing or null in the JSON file."
@@ -239,23 +295,28 @@ class ProductFetcher:
                        request_retries: int = 10,
                        backoff_factor: int = 1,
                        save_data: bool = True,
-                       **kwargs) -> Tuple[List[Dict[str, Any]], List[int]]:
+                       **kwargs: Any) -> Tuple[int, int]:  # Tuple[List[Dict[str, Any]], List[int], int]:
         """
         Fetch product details for the given product IDs with retries and backoff on failure.
 
         Args:
-            product_ids (List[int]): List of product IDs to fetch.
-            ind (int): The index to start from
-            request_retries (int, optional): Number of retries for the request.
-            backoff_factor (int, optional): Backoff factor for retries.
+            p_ids (List[int]): List of product IDs to fetch.
+            ind (int, optional): The index to start from. Defaults to 0.
+            request_retries (int, optional): Number of retries for the request. Defaults to 10.
+            backoff_factor (int, optional): Backoff factor for retries. Defaults to 1.
+            save_data (bool, optional): Whether to save fetched data. Defaults to True.
+
+        Keyword Args:
+            Any additional keyword arguments.
 
         Returns:
-            Tuple[List[Dict[str, Any]], List[int]]: A tuple containing the list of product details and the list of failed product IDs.
+            Tuple[List[Dict[str, Any]], List[int], int]:
+                A tuple containing the list of product details, the list of failed product IDs, and the status code.
         """
         start_time = time.time()
 
         host = self.product_api_url.split("//")[1].split('/')[0]
-        endpoint_base = self.product_api_url.split('https://' + host)[1]
+        endpoint_base = self.product_api_url.split(f'https://{host}')[1]
 
         self.initialize_managers()
 
@@ -265,30 +326,50 @@ class ProductFetcher:
                 raise FileNotFoundError("Failed to get authorization token.")
 
         self.headers["Authorization"] = f'Bearer {self.auth_token}'
+        self.headers["User-Agent"] = self.ua.random
 
-        data_list = []
-        total_data_list = []
-        failed_product_ids = []
+        data_list: List[Dict[str, Any]] = []
+        # total_data_list: List[Dict[str, Any]] = []
+        total_products_count = ind
+        product_count = 0
+        failed_product_ids: List[int] = []
         request_attempts = 0
-        # ind = 0
         status = 0
 
-        conn = None
-        current_proxy_ip = None
+        conn: Optional[http.client.HTTPSConnection] = None
+        current_proxy_ip: Optional[str] = None
         proxy_ind = 0
         proxy_timeout = self.proxy_timeout
         proxy_manager_timeout = self.proxy_manager_timeout
-        # use_direct_connection = False  # False for no proxy connection
-        # batch_size = 10
 
-        # Store data main structure
-        data_to_save = {
-            'platform': 'UZUM',
-            'data': []
-        }
-        save_to_file(data_to_save, 'products', self.products_dir)
+        # # Store data main structure
+        # data_to_save = {
+        #     'platform': 'UZUM',
+        #     'data': []
+        # }
+        # save_to_file(data_to_save, 'products', self.products_dir)
+
+        def save_data_to(data_list, file_name: Optional[str] = None):
+            if save_data:
+                data_to_save = {
+                    'platform': 'UZUM',
+                    'data': data_list
+                }
+                if file_name is None:
+                    file_name = f'{max(0, total_products_count - self.package_size)}-{total_products_count}'
+                save_to_file(data_to_save,
+                             file_name,
+                             f"{self.products_dir}/{datetime.now().strftime("%Y%m%d")}",
+                             override_file=False)
 
         def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
+            """
+            Wait for a certain period based on the backoff factor and the number of request attempts.
+
+            Args:
+                request_attempts (int): The current number of request attempts.
+                backoff_factor (float): The backoff factor to calculate wait time.
+            """
             self.logger.warning(f"Server rejected. Attempt number {request_attempts}")
             wait_time = backoff_factor * (2 ** request_attempts)
             self.logger.info(f"Retrying in {wait_time} seconds...")
@@ -296,8 +377,18 @@ class ProductFetcher:
 
         def make_connection(timeout: float = proxy_timeout if proxy_timeout else 10,
                             pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
-                            put_to_sleep: bool = True
-                            ) -> Tuple[http.client.HTTPSConnection, str]:
+                            put_to_sleep: bool = True) -> Tuple[http.client.HTTPSConnection, Optional[str]]:
+            """
+            Establish a new HTTP connection, optionally using a proxy.
+
+            Args:
+                timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
+                pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
+                put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to True.
+
+            Returns:
+                Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
+            """
             nonlocal conn
             nonlocal current_proxy_ip
             nonlocal proxy_ind
@@ -321,14 +412,11 @@ class ProductFetcher:
                     self.logger.debug(f"Picking a proxy and establishing a connection")
                     conn, current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
                     return conn, current_proxy_ip
-                except:
-                    self.logger.warning(f"No proxy connection!")  # Establishing direct connection to {host}")
-                    # conn = direct_connection()
-                    # current_proxy_ip = None
-
+                except Exception:
+                    self.logger.warning("No proxy connection!")
+                    # Attempting direct connection if proxy fails
             self.logger.debug(f"Establishing direct connection to {host}")
             conn = direct_connection()
-
             return conn, current_proxy_ip
 
         self.logger.info(f'Total products to parse {len(p_ids)}. Parsing...')
@@ -362,7 +450,8 @@ class ProductFetcher:
                         json_data = json.loads(decoded_data)
                         # save_to_file(json_data, "pr_response_557141", "")
                         if 'errors' in json_data:
-                            save_to_file(json_data, f"response_error_{product_id}", "products")
+                            save_data_to(json_data, f"response_error_{product_id}")
+                            # save_to_file(json_data, f"response_error_{product_id}", "products")
                             error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                             error_429 = False
                             for error_message in error_messages:
@@ -385,14 +474,17 @@ class ProductFetcher:
                         data, errors = self.parse_product(json_data)
                         if data:
                             data_list.append(data)
+                            total_products_count += 1
+                            product_count += 1
                             data_to_send = {
                                 'platform': 'UZUM',
                                 'data': [data]
                             }
-
+                            # Optionally, send data to DB or other services
+                            # send_message(data_to_send)
                         else:
                             self.logger.warning(f'Could not parse data from product ID {product_id}: {errors}')
-                            failed_product_ids.append({f'{product_id}': errors})
+                            failed_product_ids.append(product_id)
 
                         request_attempts = 0
                         proxy_manager_timeout = 10
@@ -401,13 +493,19 @@ class ProductFetcher:
 
                         if ind % self.batch_size == 0:
                             self.logger.debug(f"Processed {ind} products.")
-                        if ind % 100 == 0:
+                        if len(data_list) % self.package_size == 0:
                             if data_list and save_data:
-                                data_to_save = {
-                                    'data': data_list
-                                }
-                                save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
-                            total_data_list.extend(data_list)
+                                save_data_to(data_list)
+                                # data_to_save = {
+                                #     'platform': 'UZUM',
+                                #     'data': data_list
+                                # }
+                                # save_to_file(data_to_save,
+                                #              f'{max(0, ind - self.package_size)}-{ind}',
+                                #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
+                                #              override_file=False)
+
+                            # total_data_list.extend(data_list)
                             data_list = []
                             self.logger.debug(f'Processed {ind} products.')
 
@@ -429,7 +527,7 @@ class ProductFetcher:
                         request_attempts += 1
 
                         proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                        conn, current_proxy_ip = make_connection(timeout=(retry_time))
+                        conn, current_proxy_ip = make_connection(timeout=retry_time)
 
                         continue
                     else:
@@ -438,26 +536,43 @@ class ProductFetcher:
                             raise ValueError(f"Bad response status on a product API: {response.status}")
                         self.logger.warning(f"Bad response status on a product API: {response.status}, retrying...")
                         wait_with_backoff(request_attempts=request_attempts, backoff_factor=backoff_factor)
+                        conn, current_proxy_ip = make_connection(timeout=retry_time)
                         continue
                 except Exception as e:
                     self.logger.error(f'Failed to receive data from a product API for product ID {product_id}: {e}')
-                    # status = 1
                     request_attempts += 1
                     if request_attempts > request_retries:
                         self.logger.error("Exceeded maximum number of retries! Exiting parser...")
 
                         if save_data and data_list:
-                            data_to_save = {
-                                'data': data_list
-                            }
-                            save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
-                            total_data_list.extend(data_list)
+                            save_data_to(data_list)
+                            # data_to_save = {
+                            #     'platform': 'UZUM',
+                            #     'data': data_list
+                            # }
+                            # # save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
+                            # save_to_file(data_to_save,
+                            #              f'{max(0, ind - self.package_size)}-{ind}',
+                            #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
+                            #              override_file=False)
+
+                            # total_data_list.extend(data_list)
                             data_list = []
+                            if failed_product_ids:
+                                self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
+                                if save_data:
+                                    save_data_to(failed_product_ids, 'failed_product_ids')
+                                    # save_to_file(failed_product_ids,
+                                    #              'failed_product_ids',
+                                    #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
+                                    #              file_type="JSON")
                         break
                     wait_with_backoff(request_attempts=request_attempts, backoff_factor=backoff_factor)
+                    conn, current_proxy_ip = make_connection(timeout=retry_time)
                     continue
         except Exception as e:
-            self.logger.error(f'Error while fetching products:{e}')
+            self.logger.error(f'Error while fetching products: {e}')
+            status = 1
         finally:
             if self.proxy_manager:
                 self.proxy_manager.shutdown_scheduler()
@@ -465,38 +580,71 @@ class ProductFetcher:
                 conn.close()
 
         if data_list:
-            total_data_list.extend(data_list)
-            self.logger.info(f'Finished parsing {len(total_data_list)} products.')
+            # total_data_list.extend(data_list)
+            self.logger.info(f'Finished parsing {ind} products.')
+            self.logger.info(f'Total products parsed for {datetime.now().strftime("%d/%m/%Y")}: {total_products_count}')
             if save_data:
-                data_to_save = {
-                    'data': data_list
-                }
-                save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
+                save_data_to(data_list)
+                # data_to_save = {
+                #     'platform': 'UZUM',
+                #     'data': data_list
+                # }
+                # save_to_file(data_to_save,
+                #              f'{max(0, ind - self.package_size)}-{ind}',
+                #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
+                #              override_file=False)
+                # save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
         else:
-            self.logger.warning(f'{len(total_data_list) if len(total_data_list) else "Zero"} products parsed!')
+            self.logger.warning(f'{len(product_count) if len(product_count) else "Zero"} products parsed!')
         if failed_product_ids:
             self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
             if save_data:
-                save_to_file(failed_product_ids, 'failed_product_ids', self.products_dir, file_type="JSON")
+                save_data_to(failed_product_ids, 'failed_product_ids')
+                # save_to_file(failed_product_ids, 'failed_product_ids', f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}", file_type="JSON")
 
         end_time = time.time()
         self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")
 
-        return total_data_list, failed_product_ids, status
+        # return total_data_list, failed_product_ids, status
+        return status, ind
 
-    def run(self, p_ids: List[int]):
+    def run(self, p_ids: List[int], ind: int = 0) -> Tuple[List[Dict[str, Any]], List[int], int]:
+        """
+        Start the product fetching and parsing process.
+
+        Args:
+            p_ids (List[int]): List of product IDs to fetch.
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[int], int]:
+                A tuple containing the list of product details, the list of failed product IDs, and the status code.
+        """
         self.logger.info("Starting to fetch and parse products")
         try:
-            return self.fetch_products(p_ids)
+            self.logger.info(f"Starting to fetch products from index {ind}.")
+            return self.fetch_products(p_ids, ind=ind)
         except Exception as e:
             self.logger.error(f"In {__file__}->main: {e}")
+            # return [], [], 1
+            return 1, 0
 
-    def load_ids(self, file_name: str = "", ind: int = 0):
+    def load_ids(self, file_name: str = "", ind: int = 0) -> Optional[List[int]]:
+        """
+        Load product IDs from a specified file starting from a given index.
+
+        Args:
+            file_name (str, optional): Name of the file to load product IDs from. Defaults to "".
+            ind (int, optional): Index to start loading from. Defaults to 0.
+
+        Returns:
+            Optional[List[int]]: A list of product IDs or None if loading fails.
+        """
         product_list = load_last_saved_json(directory=f'{self.data_dir}/{self.product_ids_dir}', file_name=file_name)
         if product_list:
-            return product_list[ind:]
+            # return product_list[ind:]
+            return product_list
         else:
-            self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher' ")
+            self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher'")
             return None
 
 
@@ -505,33 +653,36 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Processing of product data.')
     parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
-                        help='an integer for the product ID to process or the path to the product IDs directory')
+                        help='An integer for the product ID to process or the path to the product IDs directory.')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
-                        const='product_ids', help='Load the last saved product IDS, specify a file name to load from data/product_ids.')
+                        const='product_ids', help='Load the last saved product IDs. Specify a file name to load from data/product_ids.')
     parser.add_argument('-i', '--index', metavar='START_INDEX', type=int, nargs='?',
                         const=0, help='Index in the categories list to start fetching from.')
 
     args = parser.parse_args()
-    product_list = []
+    product_list: List[int] = []
     if args.load:
         file_name = args.load
         if file_name:
             product_fetcher.logger.info(f"Loading IDs data from file: {file_name}")
         else:
             product_fetcher.logger.info(f"Loading the last saved IDs from: {product_fetcher.data_dir}/product_ids")
-        product_list = product_fetcher.load_ids(file_name, args.index if args.index else 0)
+        loaded_ids = product_fetcher.load_ids(file_name)
+        # loaded_ids = product_fetcher.load_ids(file_name, args.index if args.index else 0)
+        if loaded_ids:
+            product_list = loaded_ids
     elif args.product_ids:
-        product_fetcher.logger.info(f'Parsing product with ID: {args.product_ids}')
+        product_fetcher.logger.info(f'Parsing product with ID(s): {args.product_ids}')
         product_list = args.product_ids
     else:
-        # product_fetcher.logger.info(f"Loading last saved product IDs in {product_fetcher.data_dir}/product_ids.")
-        # product_list = load_last_saved_json(directory=f'{product_fetcher.data_dir}/{product_fetcher.product_ids_dir}')
         product_fetcher.logger.error("No product IDs provided!")
-        product_fetcher.logger.info("Try using -l or --load to load most recent IDs. Or type product ID to parse a specific product.")
+        product_fetcher.logger.info("Try using -l or --load to load most recent IDs. Or provide product ID(s) to parse specific product(s).")
 
     if product_list:
         product_fetcher.logger.info("Starting to parse products from the input...")
         try:
-            product_fetcher.fetch_products(product_list)
+            # fetched_data, failed_ids, status = product_fetcher.run(product_list)
+            status, ind = product_fetcher.run(product_list, args.index if args.index else 0)
+            # Optionally, handle fetched_data and failed_ids as needed
         except Exception as e:
             product_fetcher.logger.error(f"In {sys.argv[0]}->main: {e}")

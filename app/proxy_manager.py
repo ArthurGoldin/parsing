@@ -393,7 +393,7 @@ class ProxyManager:
         return manager
 
     @classmethod
-    def from_json_file(cls, file_path: str = "data/proxy/proxy.json"):
+    def from_json_file(cls, file_path: str = "proxy/proxy_list.json"):
         """
         Alternative constructor to initialize ProxyManager by reading and processing a JSON file.
         """
@@ -886,40 +886,40 @@ if __name__ == "__main__":
     {
         "proxies": [
             {
-                "ip": "193.28.183.161",
+                "ip": "193.28.183.223",
                 "ports": {
-                    "http": 6176,
-                    "https": 6176
+                    "http": 8013,
+                    "https": 8013
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@193.28.183.161:6176",
-                    "https": "user210707:6qml5v@193.28.183.161:6176"
+                    "http": "user210707:6qml5v@193.28.183.223:8013",
+                    "https": "user210707:6qml5v@193.28.183.223:8013"
                 },
-                "exp": 1729150920,
+                "exp": 1732303440,
                 "status": "ACTIVE"
             },
             {
-                "ip": "93.28.183.102",
+                "ip": "@193.28.183.120",
                 "ports": {
-                    "http": 6176,
-                    "https": 6176
+                    "http": 8013,
+                    "https": 8013
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@193.28.183.102:6176",
-                    "https": "user210707:6qml5v@193.28.183.102:6176"
+                    "http": "user210707:6qml5v@193.28.183.120:8013",
+                    "https": "user210707:6qml5v@193.28.183.120:8013"
                 },
-                "exp": 1729150920,
+                "exp": 1732303440,
                 "status": "ACTIVE"
             }
         ]
     }
     """
     # manager = ProxyManager.from_json(proxy_list)
-    manager = ProxyManager.from_json_file('data/proxy/proxy.json')
+    manager = ProxyManager.from_json_file('proxy/proxy_list.json')
     # manager1 = ProxyManager.from_json_file('data/proxy/proxy.json')
 
     for i in range(4):

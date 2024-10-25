@@ -153,8 +153,9 @@ def run_system_check(host_name="localhost"):
     try:
         logger.info('Checking product_parser...')
         product_parser = ProductFetcher()
-        products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
-        if products is None:
+        # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
+        status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)
+        if status != 0:
             res_stats["product_parser"] = "FAILED"
         else:
             res_stats["product_parser"] = "PASSED"
