@@ -76,5 +76,9 @@
 
    - With a specified container name:
      ```bash
-     docker run --name my_container_name --network barakadatauz_app-network -v $(pwd)/app/data:/app/configs -v $(pwd)/app/data:/app/data -v $(pwd)/app/logs:/app/logs uzum_parser python3 -m <module_name>
+     docker run --name <my_container_name> --network barakadatauz_app-network -v $(pwd)/app/data:/app/configs -v $(pwd)/app/data:/app/data -v $(pwd)/app/logs:/app/logs uzum_parser python3 -m <module_name>
      ```
+
+   `bash`
+   Consider different port numbers if needed.
+   `bash`
