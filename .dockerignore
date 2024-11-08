@@ -3,6 +3,5 @@ __pycache__
 .vscode
 .gitignore
 parsing.code-workspace
-ToDo.txt
 images
-
+celery

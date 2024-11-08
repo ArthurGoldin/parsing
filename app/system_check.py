@@ -1,7 +1,7 @@
 import time
 import logging
 import logging.config
-
+import os
 import sys
 from typing import List, Any
 import argparse
@@ -17,21 +17,24 @@ import send_data_to_db
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
-    logger = logging.getLogger('system_check')
+    logging.config.fileConfig(logging_config_path)
+    logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
-
 config = configparser.ConfigParser()
-config.read('configs/app.conf')
+config.read(config_path)
 
 # Load Default Configuration from JSON
-default_config = load_json('configs/default_config.json')
+default_config = load_json(f'{current_dir}/configs/default_config.json')
 
 
 def get_config(section: str, option: str) -> Any:
@@ -68,7 +71,8 @@ def validate_config():
 validate_config()
 
 # Retrieve storage configurations
-data_dir = get_config('storage', 'data_directory')
+# data_dir = get_config('storage', 'data_directory')
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = get_config('storage', 'brands_sub_dir')
 category_ids_dir = get_config('storage', 'category_ids_sub_dir')
 check_dir = get_config('storage', 'check_sub_dir')
@@ -86,8 +90,10 @@ graphql_url = get_config('urls', 'graphql_url')
 root_categories_req_url = get_config('urls', 'root_categories_req_url')
 product_api_url = get_config('urls', 'product_api_url')
 
+broker_host = get_config('broker', 'host')
 
-def run_system_check(host_name="localhost"):
+
+def run_system_check(host_name=broker_host):
     """
     Checks all modules.
     """
@@ -140,7 +146,7 @@ def run_system_check(host_name="localhost"):
     try:
         logger.info('Checking product_ids...')
         product_ids = IdsFetcher()
-        p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[0]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
+        p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
         if p_ids is None:
             res_stats["product_ids"] = "FAILED"
         else:
@@ -154,19 +160,19 @@ def run_system_check(host_name="localhost"):
         logger.info('Checking product_parser...')
         product_parser = ProductFetcher()
         # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
-        status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)
+        status, _ = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)
         if status != 0:
             res_stats["product_parser"] = "FAILED"
         else:
             res_stats["product_parser"] = "PASSED"
-        logger.info(f'product_parser: {res_stats["product_parser"]}')
+        logger.info(f'product_parser: {res_stats["product_parser"]}; return status: {status}')
     except Exception as e:
         res_stats["product_parser"] = "ERROR"
         logger.error(f"Error in product_parser: {e}")
 
     try:
         logger.info('Checking RabbitMQ messaging...')
-        message_send_res = send_data_to_db.run_default('configs', def_pr_name, host_name=host_name)
+        message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name)
         if not message_send_res:
             res_stats["send_message"] = "FAILED"
         else:

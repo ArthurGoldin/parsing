@@ -1,3 +1,4 @@
+import os
 import logging
 import logging.config
 import time
@@ -13,9 +14,13 @@ from typing import List, Dict, Optional
 from save_and_load_data import save_to_file
 # from proxy_manager import ProxyManager
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
+    logging.config.fileConfig(logging_config_path)
     logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
@@ -23,9 +28,9 @@ except Exception as e:
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 config = configparser.ConfigParser()
-config.read('configs/app.conf')
+config.read(config_path)
 
-data_dir = config.get('storage', 'data_directory')
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = config.get('storage', 'brands_sub_dir')
 
 

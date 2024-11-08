@@ -14,9 +14,14 @@ from fake_useragent import UserAgent
 from save_and_load_data import save_to_file
 from proxy_manager import ProxyManager
 
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
+    logging.config.fileConfig(logging_config_path)
     logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
@@ -24,12 +29,14 @@ except Exception as e:
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 config = configparser.ConfigParser()
-config.read('configs/app.conf')
+config.read(config_path)
 
-data_dir = config.get('storage', 'data_directory')
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 rc_dir = config.get('storage', 'root_categories_sub_dir')
 lc_dir = config.get('storage', 'category_ids_sub_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
+
+use_direct_connection = config.getboolean('root_categories', 'use_direct_connection')
 
 
 def combine_products_into_tree(category_tree: Dict[str, Any], products_by_category: Dict[str, Any]) -> Dict[str, Any]:
@@ -132,6 +139,7 @@ def get_root_categories(request_retries: int = 8,
                         backoff_factor: int = 1,
                         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
                         main_url: str = "https://uzum.uz/ru",
+                        use_direct_connection: bool = True,
                         load_most_recent_if_failed: bool = True,
                         save_data: bool = True) -> Dict[str, Any]:
     """
@@ -158,7 +166,10 @@ def get_root_categories(request_retries: int = 8,
 
     root_categories = None
     request_attempts = 0
-    proxy_manager = ProxyManager.from_json_file(proxy_dir)
+    if use_direct_connection:
+        proxy_manager = None
+    else:
+        proxy_manager = ProxyManager.from_json_file(proxy_dir)
 
     def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
         """
@@ -191,11 +202,15 @@ def get_root_categories(request_retries: int = 8,
 
     while request_attempts <= request_retries:
         try:
-            logger.debug(f"Picking a proxy and establishing a connection")
-            conn, _ = proxy_manager.make_connection(host)
-            if conn is None:
-                logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+            if use_direct_connection:
+                logger.info("Establishing a direct connection")
                 conn = http.client.HTTPSConnection(host)
+            else:
+                logger.debug(f"Picking a proxy and establishing a connection")
+                conn, _ = proxy_manager.make_connection(host)
+                if conn is None:
+                    logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+                    conn = http.client.HTTPSConnection(host)
 
             conn.request("GET", endpoint, headers=headers)
             response = conn.getresponse()
@@ -233,7 +248,8 @@ def get_root_categories(request_retries: int = 8,
             if ua is not None:
                 headers['User-Agent'] = f'{ua.random}'
         finally:
-            proxy_manager.shutdown_scheduler()
+            if proxy_manager:
+                proxy_manager.shutdown_scheduler()
             if conn is not None:
                 conn.close()
 
@@ -248,7 +264,7 @@ def get_root_categories(request_retries: int = 8,
 
 if __name__ == "__main__":
     try:
-        rc = get_root_categories()
+        rc = get_root_categories(use_direct_connection=use_direct_connection)
         lc = find_leaf_categories(rc)
 
     except Exception as e:

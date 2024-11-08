@@ -1,6 +1,6 @@
 
 # from datetime import datetime
-# import os
+import os
 # import glob
 # import csv
 import time
@@ -18,25 +18,28 @@ import configparser
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
+    logging.config.fileConfig(logging_config_path)
     logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
-
 config = configparser.ConfigParser()
-config.read('configs/app.conf')
+config.read(config_path)
 
-data_dir = config.get('storage', 'data_directory')
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = config.get('storage', 'brands_sub_dir')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 products_dir = config.get('storage', 'products_sub_dir')
 
-data_dir: str = "data"
+# data_dir: str = "data"
 
 
 def fetch_data() -> None:

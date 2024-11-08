@@ -9,9 +9,13 @@ import logging
 import logging.config
 import time
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
+    logging.config.fileConfig(logging_config_path)
     logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)

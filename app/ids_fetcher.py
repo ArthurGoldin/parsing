@@ -7,11 +7,16 @@ import json
 import time
 import uuid
 import http.client
+import os
 from typing import List, Dict, Any, Tuple, Optional
 from token_manager import TokenManager
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file, load_last_saved_json
 from proxy_manager import ProxyManager
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
 
 
 class IdsFetcher:
@@ -43,8 +48,8 @@ class IdsFetcher:
     """
 
     def __init__(self,
-                 config_path: str = 'configs/app.conf',
-                 logging_path: str = 'configs/logging.conf',
+                 config_path: str = config_path,
+                 logging_path: str = logging_config_path,
                  offset_limit: Optional[int] = None,
                  use_direct_connection: Optional[bool] = None,
                  proxy_timeout: Optional[float] = None,
@@ -76,7 +81,8 @@ class IdsFetcher:
         self.config.read(config_path)
 
         # Initialize attributes
-        self.data_dir = self.config.get('storage', 'data_directory')
+        # self.data_dir = self.config.get('storage', 'data_directory')
+        self.data_dir = os.path.join(current_dir, self.config.get('storage', 'data_directory'))
         self.product_ids_dir = self.config.get('storage', 'product_ids_sub_dir')
         self.failed_categories_dir = self.config.get('storage', 'failed_categories_sub_dir')
         self.category_ids_dir = self.config.get('storage', 'category_ids_sub_dir')
@@ -324,7 +330,7 @@ class IdsFetcher:
                 backoff_factor (float): The backoff factor to calculate wait time.
             """
             self.logger.info(f"Server rejected. Attempt number {request_attempts}")
-            wait_time = backoff_factor * (2 ** request_attempts)
+            wait_time = min(backoff_factor * (2 ** request_attempts), 2 ** 7)
             self.logger.info(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 

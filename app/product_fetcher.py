@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import logging.config
+# from types import NoneType
 import zlib
 import brotli
 from fake_useragent import UserAgent
@@ -12,12 +13,18 @@ import re
 import argparse
 import configparser
 import uuid
+import os
 from datetime import datetime
 from save_and_load_data import load_last_saved_json, save_to_file
 from image_download import download_image
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
 from token_manager import TokenManager
+
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+config_path = os.path.join(current_dir, 'configs', 'app.conf')
 
 
 class ProductFetcher:
@@ -46,8 +53,8 @@ class ProductFetcher:
     """
 
     def __init__(self,
-                 config_path: str = 'configs/app.conf',
-                 logging_path: str = 'configs/logging.conf',
+                 config_path: str = config_path,
+                 logging_path: str = logging_config_path,
                  use_direct_connection: Optional[bool] = None,
                  proxy_timeout: Optional[float] = None,
                  proxy_manager_timeout: Optional[int] = None,
@@ -78,7 +85,7 @@ class ProductFetcher:
         self.config.read(config_path)
 
         # Initialize attributes
-        self.data_dir = self.config.get('storage', 'data_directory')
+        self.data_dir = os.path.join(current_dir, self.config.get('storage', 'data_directory'))
         self.product_ids_dir = self.config.get('storage', 'product_ids_sub_dir')
         self.products_dir = self.config.get('storage', 'products_sub_dir')
         self.images_dir = self.config.get('storage', 'images_sub_dir')
@@ -86,6 +93,10 @@ class ProductFetcher:
 
         self.main_url = self.config.get('urls', 'main_url')
         self.product_api_url = self.config.get('urls', 'product_api_url')
+
+        # Broker connection
+        self.broker_host = self.config.get('broker', 'host')
+        self.broker_port = self.config.get('broker', 'port')
 
         # Fetching algorithm parameters
         self.use_direct_connection = use_direct_connection if use_direct_connection is not None else \
@@ -342,13 +353,6 @@ class ProductFetcher:
         proxy_timeout = self.proxy_timeout
         proxy_manager_timeout = self.proxy_manager_timeout
 
-        # # Store data main structure
-        # data_to_save = {
-        #     'platform': 'UZUM',
-        #     'data': []
-        # }
-        # save_to_file(data_to_save, 'products', self.products_dir)
-
         def save_data_to(data_list, file_name: Optional[str] = None):
             if save_data:
                 data_to_save = {
@@ -360,7 +364,7 @@ class ProductFetcher:
                 save_to_file(data_to_save,
                              file_name,
                              f"{self.products_dir}/{datetime.now().strftime("%Y%m%d")}",
-                             override_file=False)
+                             override_file=True)
 
         def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
             """
@@ -371,7 +375,7 @@ class ProductFetcher:
                 backoff_factor (float): The backoff factor to calculate wait time.
             """
             self.logger.warning(f"Server rejected. Attempt number {request_attempts}")
-            wait_time = backoff_factor * (2 ** request_attempts)
+            wait_time = min(backoff_factor * (2 ** request_attempts), 2 ** 7)
             self.logger.info(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 
@@ -481,7 +485,10 @@ class ProductFetcher:
                                 'data': [data]
                             }
                             # Optionally, send data to DB or other services
-                            # send_message(data_to_send)
+                            try:
+                                send_message(data_to_send, host=self.broker_host, port=self.broker_port)
+                            except Exception as e:
+                                self.logger.error(f"Failed to send to Broker: {e}")
                         else:
                             self.logger.warning(f'Could not parse data from product ID {product_id}: {errors}')
                             failed_product_ids.append(product_id)
@@ -496,22 +503,12 @@ class ProductFetcher:
                         if len(data_list) % self.package_size == 0:
                             if data_list and save_data:
                                 save_data_to(data_list)
-                                # data_to_save = {
-                                #     'platform': 'UZUM',
-                                #     'data': data_list
-                                # }
-                                # save_to_file(data_to_save,
-                                #              f'{max(0, ind - self.package_size)}-{ind}',
-                                #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
-                                #              override_file=False)
-
-                            # total_data_list.extend(data_list)
                             data_list = []
                             self.logger.debug(f'Processed {ind} products.')
 
                     elif response.status == 401:
                         self.logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
-                        # wait_with_backoff(request_attempts, backoff_factor)
+
                         self.auth_token = self.token_manager.get_token_instance()
                         self.headers['Authorization'] = f'Bearer {self.auth_token}'
                         request_attempts += 1
@@ -523,7 +520,7 @@ class ProductFetcher:
                     elif response.status == 429:  # need to avoid this
                         retry_time = int(response.headers.get("Retry-After", 1))
                         self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
-                        # wait_with_backoff(request_attempts, backoff_factor)
+
                         request_attempts += 1
 
                         proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
@@ -546,29 +543,15 @@ class ProductFetcher:
 
                         if save_data and data_list:
                             save_data_to(data_list)
-                            # data_to_save = {
-                            #     'platform': 'UZUM',
-                            #     'data': data_list
-                            # }
-                            # # save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
-                            # save_to_file(data_to_save,
-                            #              f'{max(0, ind - self.package_size)}-{ind}',
-                            #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
-                            #              override_file=False)
 
-                            # total_data_list.extend(data_list)
                             data_list = []
                             if failed_product_ids:
                                 self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
                                 if save_data:
                                     save_data_to(failed_product_ids, 'failed_product_ids')
-                                    # save_to_file(failed_product_ids,
-                                    #              'failed_product_ids',
-                                    #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
-                                    #              file_type="JSON")
                         break
                     wait_with_backoff(request_attempts=request_attempts, backoff_factor=backoff_factor)
-                    conn, current_proxy_ip = make_connection(timeout=retry_time)
+                    conn, current_proxy_ip = make_connection()
                     continue
         except Exception as e:
             self.logger.error(f'Error while fetching products: {e}')
@@ -580,27 +563,19 @@ class ProductFetcher:
                 conn.close()
 
         if data_list:
-            # total_data_list.extend(data_list)
             self.logger.info(f'Finished parsing {ind} products.')
             self.logger.info(f'Total products parsed for {datetime.now().strftime("%d/%m/%Y")}: {total_products_count}')
             if save_data:
-                save_data_to(data_list)
-                # data_to_save = {
-                #     'platform': 'UZUM',
-                #     'data': data_list
-                # }
-                # save_to_file(data_to_save,
-                #              f'{max(0, ind - self.package_size)}-{ind}',
-                #              f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}",
-                #              override_file=False)
-                # save_to_file(data_to_save, 'products', self.products_dir, override_file=False)
+                file_name = None
+                if len(data_list) == 1 and ind <= 1:
+                    file_name = str(p_ids[0])
+                save_data_to(data_list, file_name)
         else:
-            self.logger.warning(f'{len(product_count) if len(product_count) else "Zero"} products parsed!')
+            self.logger.warning(f'{product_count if product_count else "Zero"} products parsed!')
         if failed_product_ids:
             self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
             if save_data:
                 save_data_to(failed_product_ids, 'failed_product_ids')
-                # save_to_file(failed_product_ids, 'failed_product_ids', f"{self.products_dir}_{datetime.now().strftime("%Y%m%d")}", file_type="JSON")
 
         end_time = time.time()
         self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")

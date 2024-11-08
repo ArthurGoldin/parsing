@@ -12,20 +12,33 @@ import socket
 import uuid
 import http.client
 import base64
+import os
 from enum import Enum
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError
 # from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
-    logger = logging.getLogger('proxy_manager')
+    logging.config.fileConfig(logging_config_path)
+    logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
+# # Configure logging
+# try:
+#     logging.config.fileConfig('configs/logging.conf')
+#     logger = logging.getLogger('proxy_manager')
+# except Exception as e:
+#     logging.basicConfig(level=logging.INFO)
+#     logger = logging.getLogger()
+#     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
 # Initialize the scheduler with a SQLAlchemy job store (optional for persistence)
@@ -393,7 +406,7 @@ class ProxyManager:
         return manager
 
     @classmethod
-    def from_json_file(cls, file_path: str = "proxy/proxy_list.json"):
+    def from_json_file(cls, file_path: str = f"{os.path.join(current_dir, 'proxy', 'proxy_list.json')}"):
         """
         Alternative constructor to initialize ProxyManager by reading and processing a JSON file.
         """
@@ -573,7 +586,7 @@ class ProxyManager:
                 logger.warning(f"Proxy {proxy.ip} already exists and was not added")
             else:
                 self.proxies.append(proxy)
-                logger.info(f"Proxy {proxy.ip} added")
+                logger.info(f"Proxy {proxy.ip} added to manager")
 
     def remove_proxy(self, proxy: Proxy) -> None:
         """
@@ -919,7 +932,7 @@ if __name__ == "__main__":
     }
     """
     # manager = ProxyManager.from_json(proxy_list)
-    manager = ProxyManager.from_json_file('proxy/proxy_list.json')
+    manager = ProxyManager.from_json_file(f"{os.path.join(current_dir, 'proxy', 'proxy_list.json')}")
     # manager1 = ProxyManager.from_json_file('data/proxy/proxy.json')
 
     for i in range(4):

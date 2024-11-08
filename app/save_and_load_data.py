@@ -9,20 +9,25 @@ import json
 import csv
 import glob
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
+    logging.config.fileConfig(logging_config_path)
     logger = logging.getLogger('main')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
+data_def = os.path.join(current_dir, 'data')
+
 
 def save_to_file(file: Union[List[Any], Dict[str, Any]],
                  file_name: str,
                  sub_dir: str = "",
-                 data_dir: str = 'data',
+                 data_dir: str = data_def,
                  file_type: str = "",
                  add_date_time: bool = True,
                  separate_folder: bool = False,
@@ -97,7 +102,7 @@ def save_html_to_file(html: str, filename: str) -> None:
         logger.info(f"Saved {filename} to data dir.")
 
 
-def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[int]:
+def load_last_saved_csv(directory: str = data_def, file_name: str = "") -> List[int]:
     """
     Load the last saved CSV file from the specified directory.
 
@@ -134,7 +139,7 @@ def load_last_saved_csv(directory: str = "data", file_name: str = "") -> List[in
         return None
 
 
-def load_last_saved_json(directory: str = "data", file_name: str = "") -> List:
+def load_last_saved_json(directory: str = data_def, file_name: str = "") -> List:
     """
     Load the last saved JSON file from the specified directory.
 
@@ -190,7 +195,7 @@ def load_json(file_path: str) -> Dict[str, Any]:
     return None
 
 
-def load_last_saved_root_categories(directory: str = "data/root_categories") -> Dict[str, Any]:
+def load_last_saved_root_categories(directory: str = f"{data_def}/root_categories") -> Dict[str, Any]:
     """
     Load the last saved root categories JSON file from the specified directory.
 

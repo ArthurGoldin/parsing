@@ -1,7 +1,7 @@
 import os
 import requests
 import logging
-# import logging.config
+import logging.config
 
 # logging.config.fileConfig('configs/logging.conf')
 # logger = logging.getLogger()
@@ -10,12 +10,15 @@ import logging
 #     if isinstance(handler, logging.StreamHandler):  # Ensure we only modify the console handler
 #         handler.setLevel(logging.WARNING)  # Set console output to WARNING and higher for this module
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
+
 # Configure logging
 try:
-    logging.config.fileConfig('configs/logging.conf')
-    logger = logging.getLogger('image_download')
+    logging.config.fileConfig(logging_config_path)
+    logger = logging.getLogger('main')
 except Exception as e:
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
