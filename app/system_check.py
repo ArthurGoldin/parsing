@@ -7,8 +7,6 @@ from typing import List, Any
 import argparse
 
 import root_categories
-# import product_ids
-# import product_parser
 from save_and_load_data import save_to_file, load_json
 import configparser
 from token_manager import TokenManager
@@ -21,6 +19,16 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
 config_path = os.path.join(current_dir, 'configs', 'app.conf')
 
+logs_path = f"{current_dir}/logs"
+if not os.path.exists(logs_path):
+    os.makedirs(logs_path)
+
+# Check and create app.log if it does not exist
+log_file_path = os.path.join(logs_path, "app.log")
+if not os.path.exists(log_file_path):
+    with open(log_file_path, "w") as log_file:
+        log_file.write("")
+
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
@@ -32,6 +40,10 @@ except Exception as e:
 
 config = configparser.ConfigParser()
 config.read(config_path)
+
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
 
 # Load Default Configuration from JSON
 default_config = load_json(f'{current_dir}/configs/default_config.json')
