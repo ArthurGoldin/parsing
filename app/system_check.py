@@ -91,9 +91,10 @@ root_categories_req_url = get_config('urls', 'root_categories_req_url')
 product_api_url = get_config('urls', 'product_api_url')
 
 broker_host = get_config('broker', 'host')
+broker_port = get_config('broker', 'port')
 
 
-def run_system_check(host_name=broker_host):
+def run_system_check(host_name=broker_host, port=broker_port):
     """
     Checks all modules.
     """
@@ -172,7 +173,7 @@ def run_system_check(host_name=broker_host):
 
     try:
         logger.info('Checking RabbitMQ messaging...')
-        message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name)
+        message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
         if not message_send_res:
             res_stats["send_message"] = "FAILED"
         else:
@@ -196,9 +197,10 @@ if __name__ == "__main__":
                         help='a name of the rabbitmq server host for messaging')
     args = parser.parse_args()
     val = args.host_name
-
+    if val:
+        broker_host = val
     try:
-        results = run_system_check(val)
+        results = run_system_check(broker_host)
         # Determine exit code based on results
         if all(status == "PASSED" for status in results.values()):
             sys.exit(0)

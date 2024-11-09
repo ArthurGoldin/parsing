@@ -25,10 +25,11 @@ except Exception as e:
 config = configparser.ConfigParser()
 config.read(config_path)
 
-host_name = config.get('broker', 'host')
+broker_host = config.get('broker', 'host')
+broker_port = config.get('broker', 'port')
 
 
-def send_message(message, retries=5, delay=1, host=host_name, port=5672):
+def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port):
     """
     Send a message to RabbitMQ with retries if the server is unavailable.
 
@@ -63,11 +64,11 @@ def send_message(message, retries=5, delay=1, host=host_name, port=5672):
                 return False
         except Exception as e:
             logger.error(f"Failed to send message to {host}: {e}")
-            break
+            return False
     return True
 
 
-def run_default(path="", name="", host=host_name):
+def run_default(path="", name="", host=broker_host, port=broker_port):
     message = None
     if path and name:
         message = load_last_saved_json(path, name)
@@ -79,7 +80,7 @@ def run_default(path="", name="", host=host_name):
             "platform": "DEFAULT",
             "data": "DEFAULT"
         }
-    return send_message(message, host=host)
+    return send_message(message, host=host, port=port)
 
 
 if __name__ == '__main__':
