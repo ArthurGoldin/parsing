@@ -8,3 +8,4 @@ app/old
 app/data
 parsing.code-workspace
 app/logs
+app/proxy/proxy_list.json

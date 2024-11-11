@@ -3,7 +3,6 @@ import time
 import json
 import logging
 import logging.config
-# from types import NoneType
 import zlib
 import brotli
 from fake_useragent import UserAgent
@@ -20,6 +19,7 @@ from image_download import download_image
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
 from token_manager import TokenManager
+from ids_fetcher import IdsFetcher
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -306,6 +306,7 @@ class ProductFetcher:
                        request_retries: int = 10,
                        backoff_factor: int = 1,
                        save_data: bool = True,
+                       send_to_db: bool = True,
                        **kwargs: Any) -> Tuple[int, int]:  # Tuple[List[Dict[str, Any]], List[int], int]:
         """
         Fetch product details for the given product IDs with retries and backoff on failure.
@@ -480,15 +481,6 @@ class ProductFetcher:
                             data_list.append(data)
                             total_products_count += 1
                             product_count += 1
-                            data_to_send = {
-                                'platform': 'UZUM',
-                                'data': [data]
-                            }
-                            # Optionally, send data to DB or other services
-                            try:
-                                send_message(data_to_send, host=self.broker_host, port=self.broker_port)
-                            except Exception as e:
-                                self.logger.error(f"Failed to send to Broker: {e}")
                         else:
                             self.logger.warning(f'Could not parse data from product ID {product_id}: {errors}')
                             failed_product_ids.append(product_id)
@@ -503,6 +495,16 @@ class ProductFetcher:
                         if len(data_list) % self.package_size == 0:
                             if data_list and save_data:
                                 save_data_to(data_list)
+                            if send_to_db:
+                                data_to_send = {
+                                    'platform': 'UZUM',
+                                    'data': [data_list]
+                                }
+                                # Optionally, send data to DB or other services
+                                try:
+                                    send_message(data_to_send, host=self.broker_host, port=self.broker_port)
+                                except Exception as e:
+                                    self.logger.error(f"Failed to send to Broker: {e}")
                             data_list = []
                             self.logger.debug(f'Processed {ind} products.')
 
@@ -603,7 +605,7 @@ class ProductFetcher:
             # return [], [], 1
             return 1, 0
 
-    def load_ids(self, file_name: str = "", ind: int = 0) -> Optional[List[int]]:
+    def load_ids(self, file_name: str = "", ind: int = 0, run_ids_fetcher: bool = True) -> Optional[List[int]]:
         """
         Load product IDs from a specified file starting from a given index.
 
@@ -618,9 +620,19 @@ class ProductFetcher:
         if product_list:
             # return product_list[ind:]
             return product_list
-        else:
-            self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher'")
-            return None
+        elif run_ids_fetcher:
+            self.logger.info("IDs not found in local storage. Running IdsFetcher.")
+            try:
+                ids_fetcher = IdsFetcher()
+                categories = ids_fetcher.load_categories()
+                if categories:
+                    product_list = ids_fetcher.fetch_product_ids_by_categories(categories=categories)
+                    return product_list
+            except Exception as e:
+                self.logger.error(f"While running IdsFetcher: {e}")
+
+        self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher'")
+        return None
 
 
 if __name__ == "__main__":

@@ -22,6 +22,16 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
 config_path = os.path.join(current_dir, 'configs', 'app.conf')
 
+logs_path = f"{current_dir}/logs"
+if not os.path.exists(logs_path):
+    os.makedirs(logs_path)
+
+# Check and create app.log if it does not exist
+log_file_path = os.path.join(logs_path, "app.log")
+if not os.path.exists(log_file_path):
+    with open(log_file_path, "w") as log_file:
+        log_file.write("")
+
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
@@ -38,6 +48,10 @@ data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = config.get('storage', 'brands_sub_dir')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 products_dir = config.get('storage', 'products_sub_dir')
+
+data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
 
 # data_dir: str = "data"
 
@@ -60,9 +74,6 @@ def fetch_data() -> None:
 
         logger.info("Retrieving IDs...")
 
-        # # leaf_categories = sorted(save_and_load_data.load_last_saved_json('data/category_ids'), key=lambda x: x['id'])
-        # leaf_categories = save_and_load_data.load_last_saved_json('data/category_ids')
-        # p_ids = product_ids.fetch_product_ids_by_categories(leaf_categories)
         ids_fetcher = IdsFetcher()
         p_ids = ids_fetcher.run(leaf_categories)
         if p_ids is None:

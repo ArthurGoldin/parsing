@@ -1,6 +1,6 @@
 ![Marketplace logo](./images/logo.png)
 
-# Marketplace Parser for <a href="https://uzum.uz" target="_blank">Uzum market</a>
+# Marketplace Parser for [Uzum market](https://uzum.uz)
 
 ## Running the Modules Locally
 

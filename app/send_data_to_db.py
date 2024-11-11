@@ -47,7 +47,7 @@ def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(host=host, port=port))
             channel = connection.channel()
-            channel.queue_declare(queue='uzum_products')
+            channel.queue_declare(queue='uzum_products', durable=True)
             channel.basic_publish(exchange='',
                                   routing_key='uzum_products',
                                   body=json.dumps(message))

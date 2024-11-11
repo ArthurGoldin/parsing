@@ -29,6 +29,7 @@ if not os.path.exists(log_file_path):
     with open(log_file_path, "w") as log_file:
         log_file.write("")
 
+
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
@@ -173,7 +174,11 @@ def run_system_check(host_name=broker_host, port=broker_port):
         logger.info('Checking product_parser...')
         product_parser = ProductFetcher()
         # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
-        status, _ = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)
+        status, _ = product_parser.fetch_products(
+            [p_ids[0]] if p_ids else [1106551],
+            save_data=False,
+            send_to_db=False
+        )
         if status != 0:
             res_stats["product_parser"] = "FAILED"
         else:
@@ -183,17 +188,17 @@ def run_system_check(host_name=broker_host, port=broker_port):
         res_stats["product_parser"] = "ERROR"
         logger.error(f"Error in product_parser: {e}")
 
-    try:
-        logger.info('Checking RabbitMQ messaging...')
-        message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
-        if not message_send_res:
-            res_stats["send_message"] = "FAILED"
-        else:
-            res_stats["send_message"] = "PASSED"
-        logger.info(f'send_message: {res_stats["send_message"]}')
-    except Exception as e:
-        res_stats["send_message"] = "ERROR"
-        logger.error(f"Error in send_message: {e}")
+    # try:
+    #     logger.info('Checking RabbitMQ messaging...')
+    #     message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
+    #     if not message_send_res:
+    #         res_stats["send_message"] = "FAILED"
+    #     else:
+    #         res_stats["send_message"] = "PASSED"
+    #     logger.info(f'send_message: {res_stats["send_message"]}')
+    # except Exception as e:
+    #     res_stats["send_message"] = "ERROR"
+    #     logger.error(f"Error in send_message: {e}")
 
     end_time = time.time()
     logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")

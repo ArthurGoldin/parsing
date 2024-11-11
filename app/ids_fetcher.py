@@ -13,6 +13,7 @@ from token_manager import TokenManager
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file, load_last_saved_json
 from proxy_manager import ProxyManager
+from root_categories import get_root_categories, find_leaf_categories
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -612,7 +613,7 @@ class IdsFetcher:
             self.logger.error(f"In {__file__}->main: {e}")
             return []
 
-    def load_categories(self, file_name: str = "", ind: int = 0) -> Optional[List[Dict[str, Any]]]:
+    def load_categories(self, file_name: str = "", ind: int = 0, run_root_categories: bool = True) -> Optional[List[Dict[str, Any]]]:
         """
         Load categories from a specified file starting from a given index.
 
@@ -626,9 +627,15 @@ class IdsFetcher:
         categories = load_last_saved_json(directory=f'{self.data_dir}/{self.category_ids_dir}', file_name=file_name)
         if categories:
             return categories[ind:]
-        else:
-            self.logger.error(f"No categories found in {self.data_dir}/{self.category_ids_dir}. Try running first 'root_categories.py.'")
-            return None
+        elif run_root_categories:
+            self.logger.info("No stored categories found. Running 'root_categories' to fetch categories.")
+            rc = get_root_categories()
+            categories = find_leaf_categories(rc)
+            if categories:
+                return categories[ind:]
+
+        self.logger.error(f"No categories found in {self.data_dir}/{self.category_ids_dir}.")
+        return None
 
 
 if __name__ == "__main__":
