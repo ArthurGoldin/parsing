@@ -135,10 +135,101 @@ def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> 
         return None
 
 
+def find_title_by_id(data, target_id):
+    """
+    Recursively searches for a 'title' associated with a given 'id' in a nested JSON-like structure.
+
+    Parameters:
+    - data (dict or list): The JSON-like structure to search.
+    - target_id (int): The ID to find the title for.
+
+    Returns:
+    - str: The title associated with the given ID, or None if not found.
+    """
+    if isinstance(data, dict):
+        if data.get('id') == target_id:
+            return data.get('title')
+
+        if 'children' in data:
+            for child in data['children']:
+                result = find_title_by_id(child, target_id)
+                if result:
+                    return result
+
+    elif isinstance(data, list):
+        for item in data:
+            result = find_title_by_id(item, target_id)
+            if result:
+                return result
+
+    return None
+
+
+def add_title_uz(rc1, rc2):
+    """
+    Adds a 'titleUz' key to each item in rc1 with the 'title' from rc2 that has a matching 'id'.
+    Ensures 'titleUz' appears immediately after 'title' in each dictionary. If no match is found
+    in rc2, assigns 'N/A' to 'titleUz'.
+
+    Parameters:
+    - rc1 (dict or list): The target JSON-like structure to add 'titleUz' keys.
+    - rc2 (dict or list): The source structure from which to retrieve titles by ID.
+    """
+    if isinstance(rc1, dict):
+        if 'title' in rc1:
+            title_uz = find_title_by_id(rc2, rc1.get('id')) or "N/A"
+
+            reordered_rc1 = {}
+            for key, value in rc1.items():
+                reordered_rc1[key] = value
+                if key == 'title':
+                    reordered_rc1['titleUz'] = title_uz
+            rc1.clear()
+            rc1.update(reordered_rc1)
+
+        if 'children' in rc1:
+            for child in rc1['children']:
+                add_title_uz(child, rc2)
+
+    elif isinstance(rc1, list):
+        for item in rc1:
+            add_title_uz(item, rc2)
+
+
+# def add_title_uz(rc1, rc2):
+#     """
+#     Adds a 'titleUz' key to each dictionary in `rc1` using the 'title' value from the corresponding
+#     dictionary in `rc2`. Assumes both structures have a compatible layout with matching 'children' lists.
+
+#     Parameters:
+#     - rc1 (dict or list): Target JSON-like structure to update by adding 'titleUz' keys.
+#     - rc2 (dict or list): Source structure providing 'title' values for 'titleUz' in `rc1`.
+
+#     Raises:
+#     - ValueError: If `rc1` and `rc2` have differing 'children' list lengths, indicating incompatible structures.
+#     """
+#     if isinstance(rc1, dict) and isinstance(rc2, dict):
+#         if 'title' in rc1 and 'title' in rc2:
+#             rc1['titleUz'] = rc2['title']
+
+#         if 'children' in rc1 and 'children' in rc2:
+#             if len(rc1['children']) != len(rc2['children']):
+#                 raise ValueError(f"Root-categories lengths of different languages are not compatible! rc1[{rc1['id']}]({len(rc1['children'])}) != rc2[{rc2['id']}]({len(rc2['children'])})")
+#             for i in range(len(rc1['children'])):
+#                 add_title_uz(rc1['children'][i], rc2['children'][i])
+
+#     elif isinstance(rc1, list) and isinstance(rc2, list):
+#         if len(rc1) != len(rc2):
+#             raise ValueError(f"Root-categories lengths of different languages are not compatible! rc1({len(rc1)}) != rc2({len(rc2)})")
+#         for i in range(len(rc1)):
+#             add_title_uz(rc1[i], rc2[i])
+
+
 def get_root_categories(request_retries: int = 8,
                         backoff_factor: int = 1,
                         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
-                        main_url: str = "https://uzum.uz/ru",
+                        main_url: str = "https://uzum.uz/",
+                        accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
                         use_direct_connection: bool = True,
                         load_most_recent_if_failed: bool = True,
                         save_data: bool = True) -> Dict[str, Any]:
@@ -159,7 +250,7 @@ def get_root_categories(request_retries: int = 8,
         'authority': f'{host}',
         'Accept': 'application/json',
         'Accept-Encoding': 'gzip, deflate, br, zstd',
-        'Accept-Language': 'ru-RU',
+        'Accept-Language': f'{accept_lang[0]}',
         'Authorization': 'Bearer ',  # Include the actual token if needed
         'User-Agent': ua.random if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     }
@@ -211,33 +302,37 @@ def get_root_categories(request_retries: int = 8,
                 if conn is None:
                     logger.warning(f"No proxy connection! Establishing direct connection to {host}")
                     conn = http.client.HTTPSConnection(host)
+            for lang in range(len(accept_lang)):
+                headers['Accept-Language'] = accept_lang[lang]
+                conn.request("GET", endpoint, headers=headers)
+                response = conn.getresponse()
+                rc = None
+                if response.status == 200:
+                    response_data = response.read()
+                    content_encoding = response.getheader('Content-Encoding')
 
-            conn.request("GET", endpoint, headers=headers)
-            response = conn.getresponse()
+                    if content_encoding:
+                        response_data = decompress_http_response(response_data, content_encoding)
 
-            if response.status == 200:
-                response_data = response.read()
-                content_encoding = response.getheader('Content-Encoding')
-
-                if content_encoding:
-                    response_data = decompress_http_response(response_data, content_encoding)
-
-                decoded_data = response_data.decode('utf-8')
-                if not decoded_data:
-                    raise ValueError("Empty response data")
-                root_categories = json.loads(decoded_data)
-                if save_data:
-                    try:
-                        save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
-                    except Exception as e:
-                        logger.error(f'Error in get_root_categories: {e}')
-
-                logger.info(f'Collected root-categories from {main_url}')
-                break  # Exit the loop if the request is successful
-            else:
-                raise ValueError(
-                    f"HTTP error occurred while fetching root-categories: Status code {response.status}")
-
+                    decoded_data = response_data.decode('utf-8')
+                    if not decoded_data:
+                        raise ValueError("Empty response data")
+                    rc = json.loads(decoded_data)
+                    logger.info(f'Collected root-categories from {main_url}:{headers['Accept-Language']}')
+                else:
+                    raise ValueError(f"HTTP error occurred while fetching root-categories: Status code {response.status}")
+                if rc:
+                    if lang:
+                        try:
+                            print("before")
+                            add_title_uz(root_categories['payload'], rc['payload'])
+                            print('after')
+                            # root_categories = rc
+                        except Exception as e:
+                            logger.error(f'Error while merging titles: {e}')
+                    else:
+                        root_categories = rc
+            break
         except Exception as e:
             logger.error(e)
             request_attempts += 1
@@ -254,11 +349,15 @@ def get_root_categories(request_retries: int = 8,
                 conn.close()
 
     if root_categories is None:
-        logger.warning(
-            f'No root-categories collected from {main_url}')
+        logger.warning(f'No root-categories collected from {main_url}')
         if load_most_recent_if_failed:
             logger.info('Loading the most recent root-categories...')
             root_categories = load_last_saved_root_categories()
+    elif save_data:
+        try:
+            save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
+        except Exception as e:
+            logger.error(f'Error in get_root_categories: {e}')
     return root_categories
 
 
