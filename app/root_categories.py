@@ -13,6 +13,7 @@ from typing import List, Dict, Any
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file
 from proxy_manager import ProxyManager
+from send_data_to_db import send_message
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,9 @@ data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 rc_dir = config.get('storage', 'root_categories_sub_dir')
 lc_dir = config.get('storage', 'category_ids_sub_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
+
+broker_host = config.get('broker', 'host')
+broker_port = config.get('broker', 'port')
 
 use_direct_connection = config.getboolean('root_categories', 'use_direct_connection')
 
@@ -196,35 +200,6 @@ def add_title_uz(rc1, rc2):
             add_title_uz(item, rc2)
 
 
-# def add_title_uz(rc1, rc2):
-#     """
-#     Adds a 'titleUz' key to each dictionary in `rc1` using the 'title' value from the corresponding
-#     dictionary in `rc2`. Assumes both structures have a compatible layout with matching 'children' lists.
-
-#     Parameters:
-#     - rc1 (dict or list): Target JSON-like structure to update by adding 'titleUz' keys.
-#     - rc2 (dict or list): Source structure providing 'title' values for 'titleUz' in `rc1`.
-
-#     Raises:
-#     - ValueError: If `rc1` and `rc2` have differing 'children' list lengths, indicating incompatible structures.
-#     """
-#     if isinstance(rc1, dict) and isinstance(rc2, dict):
-#         if 'title' in rc1 and 'title' in rc2:
-#             rc1['titleUz'] = rc2['title']
-
-#         if 'children' in rc1 and 'children' in rc2:
-#             if len(rc1['children']) != len(rc2['children']):
-#                 raise ValueError(f"Root-categories lengths of different languages are not compatible! rc1[{rc1['id']}]({len(rc1['children'])}) != rc2[{rc2['id']}]({len(rc2['children'])})")
-#             for i in range(len(rc1['children'])):
-#                 add_title_uz(rc1['children'][i], rc2['children'][i])
-
-#     elif isinstance(rc1, list) and isinstance(rc2, list):
-#         if len(rc1) != len(rc2):
-#             raise ValueError(f"Root-categories lengths of different languages are not compatible! rc1({len(rc1)}) != rc2({len(rc2)})")
-#         for i in range(len(rc1)):
-#             add_title_uz(rc1[i], rc2[i])
-
-
 def get_root_categories(request_retries: int = 8,
                         backoff_factor: int = 1,
                         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
@@ -232,6 +207,7 @@ def get_root_categories(request_retries: int = 8,
                         accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
                         use_direct_connection: bool = True,
                         load_most_recent_if_failed: bool = True,
+                        send_to_broker: bool = True,
                         save_data: bool = True) -> Dict[str, Any]:
     """
     Fetch root categories from the API, with retries and backoff on failure.
@@ -353,11 +329,17 @@ def get_root_categories(request_retries: int = 8,
         if load_most_recent_if_failed:
             logger.info('Loading the most recent root-categories...')
             root_categories = load_last_saved_root_categories()
-    elif save_data:
-        try:
-            save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
-        except Exception as e:
-            logger.error(f'Error in get_root_categories: {e}')
+    else:
+        if send_to_broker:
+            try:
+                send_message(root_categories, host=broker_host, port=broker_port, queue_name='uzum_categories')
+            except Exception as e:
+                logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+        if save_data:
+            try:
+                save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
+            except Exception as e:
+                logger.error(f'Error in get_root_categories: {e}')
     return root_categories
 
 

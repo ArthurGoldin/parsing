@@ -29,7 +29,7 @@ broker_host = config.get('broker', 'host')
 broker_port = config.get('broker', 'port')
 
 
-def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port):
+def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port, queue_name="uzum_products"):
     """
     Send a message to RabbitMQ with retries if the server is unavailable.
 
@@ -47,9 +47,9 @@ def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(host=host, port=port))
             channel = connection.channel()
-            channel.queue_declare(queue='uzum_products', durable=True)
+            channel.queue_declare(queue=queue_name, durable=True)
             channel.basic_publish(exchange='',
-                                  routing_key='uzum_products',
+                                  routing_key=queue_name,
                                   body=json.dumps(message))
             logger.debug('Message is sent')
             connection.close()
