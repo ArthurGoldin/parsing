@@ -15,7 +15,7 @@ import uuid
 import os
 from datetime import datetime
 from save_and_load_data import load_last_saved_json, save_to_file
-from image_download import download_image
+from image_download import upload_image_from_url
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
 from token_manager import TokenManager
@@ -221,6 +221,17 @@ class ProductFetcher:
                 'parent': get_hierarchical_parents(parent)
             }
 
+        def get_image_url(data: Dict[str, Any], img_type: str = 'high') -> str:
+            img_res = ['800', '720', '480', '240', '120', '80', '24034']
+            for i in img_res:
+                try:
+                    img_url = data.get(i, {}).get(img_type, {})
+                    if img_url:
+                        return img_url
+                except Exception as e:
+                    self.logger.error(f"Failed to retrieve image URL: {e}")
+            return None
+
         try:
             if json_data.get('payload') is None:
                 if 'errors' in json_data:
@@ -245,6 +256,13 @@ class ProductFetcher:
                 brand = find_keywords_in_title(payload.get('title'), brand_keywords) if brand_keywords else []
 
             # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
+            img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
+            if img_url:
+                try:
+                    obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+                    upload_image_from_url(image_url=img_url, object_key=obj_key)
+                except Exception as e:
+                    self.logger.error(f"Failed to upload an image: {e}")
 
             result: Dict[str, Any] = {
                 'id': payload.get('id'),

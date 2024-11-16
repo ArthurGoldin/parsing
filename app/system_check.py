@@ -10,7 +10,7 @@ import root_categories
 from save_and_load_data import save_to_file, load_json
 import configparser
 from token_manager import TokenManager
-import send_data_to_db
+# import send_data_to_db
 
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher

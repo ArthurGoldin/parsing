@@ -10,6 +10,8 @@ import logging.config
 #     if isinstance(handler, logging.StreamHandler):  # Ensure we only modify the console handler
 #         handler.setLevel(logging.WARNING)  # Set console output to WARNING and higher for this module
 
+BASE_URL = "http://your_server_address:8000"
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
 
@@ -52,3 +54,22 @@ def download_image(
         response.close()  # Ensuring the connection is closed
 
     return image_path
+
+
+def upload_image_from_url(
+        image_url: str,
+        object_key: str,
+        image_category: str = "product"):
+    url = f"{BASE_URL}/upload-from-url"
+    data = {
+        "url": image_url,
+        "image_category": image_category,
+        "object_key": object_key
+    }
+    response = requests.post(url, json=data)
+    if response.status_code == 200:
+        logger.debug(f"Image uploaded successfully.")
+        return response.json()
+    else:
+        logger.error(f"Error: {response.status_code}, {response.text}")
+        return None

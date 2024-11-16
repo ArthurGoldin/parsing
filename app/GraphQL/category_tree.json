@@ -1,0 +1,22 @@
+{
+    "operationName": "getMakeSearch",
+    "variables": {
+        "queryInput": {
+            "categoryId": "1",
+            "showAdultContent": "TRUE",
+            "filters": [],
+            "sort": "BY_RELEVANCE_DESC",
+            "pagination": {
+                "offset": 0,
+                "limit": 0
+            },
+            "correctQuery": false,
+            "getFastCategories": true,
+            "fastCategoriesLevelOffset": 2,
+            "getPromotionItems": true,
+            "getFastFacets": false,
+            "fastFacetsLimit": 0
+        }
+    },
+    "query": "query getMakeSearch($queryInput: MakeSearchQueryInput!) { makeSearch(query: $queryInput) { id queryId queryText category { ...CategoryShortFragment __typename } categoryTree { category { ...CategoryFragment __typename } total __typename } items { adMarker { marker __typename } catalogCard { __typename ...SkuGroupCardFragment } bidId __typename } fastFacets { ...FacetFragment __typename } total mayHaveAdultContent categoryFullMatch offerCategory { title id __typename } correctedQueryText categoryWasPredicted fastCategories { category { ...FastCategoryFragment __typename } total __typename } permanentLinkSeo { id seoHeader seoMetaTag seoTitle __typename } token __typename } } fragment FacetFragment on Facet { filter { id title type measurementUnit description __typename } buckets { filterValue { id description image name __typename } total __typename } range { min max __typename } __typename } fragment CategoryFragment on Category { id icon parent { id __typename } seo { header metaTag __typename } title title_ru title_uz adult __typename } fragment CategoryShortFragment on Category { id parent { id title title_ru title_uz __typename } title title_ru title_uz __typename } fragment FastCategoryFragment on Category { id parent { id title __typename } title seo { header metaTag __typename } __typename } fragment SkuGroupCardFragment on SkuGroupCard { ...DefaultCardFragment photos { key link(trans: PRODUCT_540) { high low __typename } previewLink: link(trans: PRODUCT_240) { high low __typename } __typename } badges { ... on BottomTextBadge { backgroundColor description id link text textColor __typename } ... on UzumInstallmentTitleBadge { backgroundColor text id textColor __typename } __typename } characteristicValues { id value title characteristic { values { id title value __typename } title id __typename } __typename } __typename } fragment DefaultCardFragment on CatalogCard { adult favorite feedbackQuantity id minFullPrice minSellPrice offer { due icon text textColor __typename } badges { backgroundColor text textColor __typename } discountInfo { text textColor backgroundColor __typename } ordersQuantity productId rating title __typename }"
+}

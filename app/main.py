@@ -1,8 +1,6 @@
 
 # from datetime import datetime
 import os
-# import glob
-# import csv
 import time
 import logging
 import logging.config
@@ -11,9 +9,6 @@ import sys
 from typing import List, Any
 
 import root_categories
-# import product_ids
-# import product_parser
-# import save_and_load_data
 import configparser
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
@@ -52,8 +47,6 @@ products_dir = config.get('storage', 'products_sub_dir')
 data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 if not os.path.exists(data_dir):
     os.makedirs(data_dir)
-
-# data_dir: str = "data"
 
 
 def fetch_data() -> None:

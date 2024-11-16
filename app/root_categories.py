@@ -11,9 +11,10 @@ import sys
 import configparser
 from typing import List, Dict, Any
 from fake_useragent import UserAgent
-from save_and_load_data import save_to_file
+from save_and_load_data import save_to_file, load_last_saved_json, load_json
 from proxy_manager import ProxyManager
 from send_data_to_db import send_message
+from token_manager import TokenManager
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,14 +34,159 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
+graphql_dir = os.path.join(current_dir, config.get('storage', 'graphql_dir'))
 rc_dir = config.get('storage', 'root_categories_sub_dir')
 lc_dir = config.get('storage', 'category_ids_sub_dir')
+ct_dir = config.get('storage', 'category_tree_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
 
 broker_host = config.get('broker', 'host')
 broker_port = config.get('broker', 'port')
 
 use_direct_connection = config.getboolean('root_categories', 'use_direct_connection')
+
+
+def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
+    """
+    Decompress the given HTTP response data based on its encoding.
+
+    Args:
+        response_data (bytes): The compressed response data.
+        encoding (str): The encoding method.
+
+    Returns:
+        bytes: The decompressed data.
+    """
+    if encoding == 'gzip':
+        return zlib.decompress(response_data, zlib.MAX_WBITS | 16)
+    elif encoding == 'deflate':
+        try:
+            return zlib.decompress(response_data)
+        except zlib.error:
+            return zlib.decompress(response_data, -zlib.MAX_WBITS)
+    elif encoding == 'br':
+        return brotli.decompress(response_data)
+    else:
+        return response_data
+
+
+def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
+    logger.info(f"Server rejected. Attempt number {request_attempts}")
+    wait_time = backoff_factor * (2 ** request_attempts)
+    logger.info(f"Retrying in {wait_time} seconds...")
+    time.sleep(wait_time)
+
+
+def get_category_tree(
+        request_retries: int = 8,
+        backoff_factor: int = 1,
+        graphql_req_url: str = "https://graphql.uzum.uz/",
+        main_url: str = "https://uzum.uz/",
+        use_direct_connection: bool = True,
+        proxy_manager=None,
+        load_most_recent_if_failed: bool = True,
+        save_data: bool = True,
+        **kwargs) -> Dict[str, Any]:
+
+    logger.info("Initiating tokenManager in 'root_categories'.")
+    token_manager = TokenManager(
+        url=main_url,
+        max_retries=kwargs.get('token_retries', 5),
+        save_token=kwargs.get('save_token', False),
+        save_cookies=False
+    )
+    auth_token = token_manager.get_token_instance()
+    if auth_token is None:
+        raise FileNotFoundError("Failed to get authorization token.")
+
+    ua = UserAgent()
+    host = graphql_req_url.split('//')[1].split('/')[0]
+    endpoint = "/"
+    headers = {
+        'Accept': '*/*',
+        'Accept-Language': 'ru-RU',
+        'apollographql-client-name': 'web-customers',
+        'apollographql-client-version': '1.25.2',
+        'Authorization': f'Bearer {auth_token}',
+        'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
+        'Content-Type': 'application/json',
+        'Origin': f'{main_url}',
+        'Priority': 'u=1, i',
+        'Referer': f'{main_url}',
+        'sec-fetch-site': 'same-site',
+        'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
+        'User-Agent': ua.random,
+        'x-context': 'null',
+        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
+    }
+
+    payload_json = load_json(f"{graphql_dir}/{ct_dir}.json")
+
+    category_tree = None
+    proxy_close = False
+    request_attempts = 0
+    if use_direct_connection:
+        proxy_manager = None
+    else:
+        if proxy_manager is None:
+            proxy_manager = ProxyManager.from_json_file(proxy_dir)
+            proxy_close = True
+
+    while request_attempts <= request_retries:
+        try:
+            if use_direct_connection:
+                logger.info("Establishing a direct connection")
+                conn = http.client.HTTPSConnection(host)
+            else:
+                logger.debug(f"Picking a proxy and establishing a connection")
+                conn, _ = proxy_manager.make_connection(host)
+                if conn is None:
+                    logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+                    conn = http.client.HTTPSConnection(host)
+
+            conn.request("POST", endpoint, json.dumps(payload_json), headers=headers)
+            response = conn.getresponse()
+            if response.status == 200:
+                response_data = response.read()
+                content_encoding = response.getheader('Content-Encoding')
+
+                if content_encoding:
+                    response_data = decompress_http_response(response_data, content_encoding)
+
+                decoded_data = response_data.decode('utf-8')
+                if not decoded_data:
+                    raise ValueError("Empty response data")
+                category_tree = json.loads(decoded_data)
+                logger.info(f'Collected category tree from {main_url}:{headers['Accept-Language']}')
+            else:
+                raise ValueError(f"HTTP error occurred while fetching category tree from a GraphQL: Status code {response.status}")
+            break
+        except Exception as e:
+            logger.error(e)
+            request_attempts += 1
+            if request_attempts > request_retries:
+                logger.error('Exceeded max number of retries!')
+                break
+            wait_with_backoff(request_attempts, backoff_factor)
+            if ua is not None:
+                headers['User-Agent'] = f'{ua.random}'
+        finally:
+            if proxy_manager and proxy_close:
+                proxy_manager.shutdown_scheduler()
+            if conn is not None:
+                conn.close()
+
+    if category_tree is None:
+        logger.warning(f'No category tree collected from {main_url}')
+        if load_most_recent_if_failed:
+            logger.info('Loading most recent category tree...')
+            category_tree = load_last_saved_json(f"{data_dir}/{ct_dir}", f"{ct_dir}.json")
+    if save_data:
+        try:
+            save_to_file(category_tree, ct_dir, ct_dir, add_date_time=False, separate_folder=False)
+        except Exception as e:
+            logger.error(f'Error in get_category_tree: {e}')
+    return category_tree
 
 
 def combine_products_into_tree(category_tree: Dict[str, Any], products_by_category: Dict[str, Any]) -> Dict[str, Any]:
@@ -206,6 +352,7 @@ def get_root_categories(request_retries: int = 8,
                         main_url: str = "https://uzum.uz/",
                         accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
                         use_direct_connection: bool = True,
+                        proxy_manager=None,
                         load_most_recent_if_failed: bool = True,
                         send_to_broker: bool = True,
                         save_data: bool = True) -> Dict[str, Any]:
@@ -233,39 +380,13 @@ def get_root_categories(request_retries: int = 8,
 
     root_categories = None
     request_attempts = 0
+    proxy_close = False
     if use_direct_connection:
         proxy_manager = None
     else:
-        proxy_manager = ProxyManager.from_json_file(proxy_dir)
-
-    def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
-        """
-        Decompress the given HTTP response data based on its encoding.
-
-        Args:
-            response_data (bytes): The compressed response data.
-            encoding (str): The encoding method.
-
-        Returns:
-            bytes: The decompressed data.
-        """
-        if encoding == 'gzip':
-            return zlib.decompress(response_data, zlib.MAX_WBITS | 16)
-        elif encoding == 'deflate':
-            try:
-                return zlib.decompress(response_data)
-            except zlib.error:
-                return zlib.decompress(response_data, -zlib.MAX_WBITS)
-        elif encoding == 'br':
-            return brotli.decompress(response_data)
-        else:
-            return response_data
-
-    def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
-        logger.info(f"Server rejected. Attempt number {request_attempts}")
-        wait_time = backoff_factor * (2 ** request_attempts)
-        logger.info(f"Retrying in {wait_time} seconds...")
-        time.sleep(wait_time)
+        if proxy_manager is None:
+            proxy_manager = ProxyManager.from_json_file(proxy_dir)
+            proxy_close = True
 
     while request_attempts <= request_retries:
         try:
@@ -300,9 +421,7 @@ def get_root_categories(request_retries: int = 8,
                 if rc:
                     if lang:
                         try:
-                            print("before")
                             add_title_uz(root_categories['payload'], rc['payload'])
-                            print('after')
                             # root_categories = rc
                         except Exception as e:
                             logger.error(f'Error while merging titles: {e}')
@@ -319,7 +438,7 @@ def get_root_categories(request_retries: int = 8,
             if ua is not None:
                 headers['User-Agent'] = f'{ua.random}'
         finally:
-            if proxy_manager:
+            if proxy_manager and proxy_close:
                 proxy_manager.shutdown_scheduler()
             if conn is not None:
                 conn.close()
@@ -345,8 +464,9 @@ def get_root_categories(request_retries: int = 8,
 
 if __name__ == "__main__":
     try:
-        rc = get_root_categories(use_direct_connection=use_direct_connection)
-        lc = find_leaf_categories(rc)
+        ct = get_category_tree(use_direct_connection=use_direct_connection)
+        # rc = get_root_categories(use_direct_connection=use_direct_connection)
+        # lc = find_leaf_categories(rc)
 
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->main: {e}")
