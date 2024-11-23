@@ -9,9 +9,11 @@
     "product_ids_sub_dir": "product_ids",
     "products_sub_dir": "products",
     "root_categories_sub_dir": "root_categories",
+    "category_tree_dir": "category_tree",
     "token_sub_dir": "token",
     "def_product_name": "default_prod.json",
-    "proxy_dir": "proxy/proxy_list.json"
+    "proxy_dir": "proxy/proxy_list.json",
+    "graphql_dir": "GraphQL"
   },
   "urls": {
     "main_url": "https://uzum.uz/ru",
@@ -21,12 +23,14 @@
   },
   "ids_fetching": {
     "use_direct_connection": false,
+    "cumulative_save": false,
     "proxy_timeout": 2.5,
     "proxy_manager_timeout": 10,
     "offset_limit": 10001,
     "batch_size": 10
   },
   "product_fetching": {
+    "language": "uz",
     "use_direct_connection": false,
     "proxy_timeout": 2.5,
     "proxy_manager_timeout": 10,

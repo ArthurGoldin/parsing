@@ -146,6 +146,18 @@ def run_system_check(host_name=broker_host, port=broker_port):
         logger.error(f"Error in root_categories: {e}")
 
     try:
+        logger.info('Checking category tree request with GraphQl...')
+        ct = root_categories.get_category_tree(save_data=False)
+        if ct is None:
+            res_stats["root_categories(GraphQL request)"] = "FAILED"
+        else:
+            res_stats["root_categories(GraphQL request)"] = "PASSED"
+        logger.info(f'root_categories(GraphQL request): {res_stats["root_categories(GraphQL request)"]}')
+    except Exception as e:
+        res_stats["root_categories(GraphQL request)"] = "ERROR"
+        logger.error(f"Error in root_categories(GraphQL request): {e}")
+
+    try:
         logger.info('Checking leaf_categories...')
         leaf_categories = root_categories.find_leaf_categories(rc, save_data=False)
         if not leaf_categories:

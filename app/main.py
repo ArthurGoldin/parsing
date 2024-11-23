@@ -12,6 +12,8 @@ import root_categories
 import configparser
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
+from save_and_load_data import load_last_saved_json
+from brands_crawler import run_brands_crawler
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -56,22 +58,28 @@ def fetch_data() -> None:
     This function fetches root categories, leaf categories, product IDs, and product details.
     """
     start_time = time.time()
+
     try:
-        rc = root_categories.get_root_categories()
-        if rc is None:
+        _, rc_s, _ = root_categories.get_all_root_categories()
+        if rc_s is None:
             raise FileNotFoundError("Failed to load root-categories.")
 
-        leaf_categories = root_categories.find_leaf_categories(rc)
-        if not leaf_categories:
+        lc = root_categories.find_leaf_categories(rc_s)
+        if not lc:
             raise AttributeError("Leaf categories not found")
 
         logger.info("Retrieving IDs...")
 
         ids_fetcher = IdsFetcher()
-        p_ids = ids_fetcher.run(leaf_categories)
+        p_ids = ids_fetcher.run(lc)
         if p_ids is None:
             raise FileNotFoundError("Failed to retrieve product IDs.")
         # p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
+
+        brands_by_category = load_last_saved_json(f'{data_dir}/{config.get("storage", "brands_sub_dir")}')
+        if not brands_by_category:
+            logger.info("No brands stored. Running brands_crawler...")
+            run_brands_crawler()
 
         logger.info('Parsing products...')
         product_fetcher = ProductFetcher()

@@ -1,22 +1,23 @@
-import http.client
-import time
-import json
-import logging
-import logging.config
-import zlib
+import argparse
+import configparser
 import brotli
+import zlib
+import logging.config
+import json
+import time
+import uuid
+import http.client
 import glob
 import os
 import sys
-import configparser
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file, load_last_saved_json, load_json
 from proxy_manager import ProxyManager
 from send_data_to_db import send_message
 from token_manager import TokenManager
 
-
+# Define current directory and configuration paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
 config_path = os.path.join(current_dir, 'configs', 'app.conf')
@@ -30,9 +31,11 @@ except Exception as e:
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
+# Read configuration
 config = configparser.ConfigParser()
 config.read(config_path)
 
+# Initialize directories and broker settings from config
 data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 graphql_dir = os.path.join(current_dir, config.get('storage', 'graphql_dir'))
 rc_dir = config.get('storage', 'root_categories_sub_dir')
@@ -41,7 +44,7 @@ ct_dir = config.get('storage', 'category_tree_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
 
 broker_host = config.get('broker', 'host')
-broker_port = config.get('broker', 'port')
+broker_port = config.getint('broker', 'port')
 
 use_direct_connection = config.getboolean('root_categories', 'use_direct_connection')
 
@@ -71,10 +74,32 @@ def decompress_http_response(response_data: bytes, encoding: str) -> bytes:
 
 
 def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
+    """
+    Wait for a certain period based on the backoff factor and the number of request attempts.
+
+    Args:
+        request_attempts (int): The current number of request attempts.
+        backoff_factor (float): The backoff factor to calculate wait time.
+    """
     logger.info(f"Server rejected. Attempt number {request_attempts}")
     wait_time = backoff_factor * (2 ** request_attempts)
     logger.info(f"Retrying in {wait_time} seconds...")
     time.sleep(wait_time)
+
+
+def get_response(headers: Dict[str, str], proxy_manager: Optional[ProxyManager] = None) -> Optional[http.client.HTTPResponse]:
+    """
+    Make an HTTP request and return the response.
+
+    Args:
+        headers (Dict[str, str]): HTTP headers to include in the request.
+        proxy_manager (Optional[ProxyManager], optional): Proxy manager to handle proxy connections. Defaults to None.
+
+    Returns:
+        Optional[http.client.HTTPResponse]: The HTTP response if successful, else None.
+    """
+    # Placeholder implementation. Implement according to specific requirements.
+    pass
 
 
 def get_category_tree(
@@ -83,12 +108,27 @@ def get_category_tree(
         graphql_req_url: str = "https://graphql.uzum.uz/",
         main_url: str = "https://uzum.uz/",
         use_direct_connection: bool = True,
-        proxy_manager=None,
+        proxy_manager: Optional[ProxyManager] = None,
         load_most_recent_if_failed: bool = True,
         save_data: bool = True,
         **kwargs) -> Dict[str, Any]:
+    """
+    Fetch the category tree from the GraphQL API with retries and backoff on failure.
 
-    logger.info("Initiating tokenManager in 'root_categories'.")
+    Args:
+        request_retries (int, optional): Number of retries for the request. Defaults to 8.
+        backoff_factor (int, optional): Backoff factor for retries. Defaults to 1.
+        graphql_req_url (str, optional): GraphQL API URL. Defaults to "https://graphql.uzum.uz/".
+        main_url (str, optional): Main URL of the platform. Defaults to "https://uzum.uz/".
+        use_direct_connection (bool, optional): Whether to use direct connection without proxies. Defaults to True.
+        proxy_manager (Optional[ProxyManager], optional): Proxy manager instance. Defaults to None.
+        load_most_recent_if_failed (bool, optional): Whether to load the most recent saved category tree if fetching fails. Defaults to True.
+        save_data (bool, optional): Whether to save the fetched category tree to a file. Defaults to True.
+
+    Returns:
+        Dict[str, Any]: The fetched category tree data.
+    """
+    logger.info("Initiating TokenManager in 'root_categories'.")
     token_manager = TokenManager(
         url=main_url,
         max_retries=kwargs.get('token_retries', 5),
@@ -125,6 +165,7 @@ def get_category_tree(
     category_tree = None
     proxy_close = False
     request_attempts = 0
+
     if use_direct_connection:
         proxy_manager = None
     else:
@@ -157,31 +198,32 @@ def get_category_tree(
                 if not decoded_data:
                     raise ValueError("Empty response data")
                 category_tree = json.loads(decoded_data)
-                logger.info(f'Collected category tree from {main_url}:{headers['Accept-Language']}')
+                logger.info(f"Collected category tree from {main_url} with Accept-Language: {headers['Accept-Language']}")
             else:
-                raise ValueError(f"HTTP error occurred while fetching category tree from a GraphQL: Status code {response.status}")
+                raise ValueError(f"HTTP error occurred while fetching category tree from GraphQL: Status code {response.status}")
             break
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Attempt {request_attempts + 1} failed: {e}")
             request_attempts += 1
             if request_attempts > request_retries:
                 logger.error('Exceeded max number of retries!')
                 break
             wait_with_backoff(request_attempts, backoff_factor)
             if ua is not None:
-                headers['User-Agent'] = f'{ua.random}'
+                headers['User-Agent'] = ua.random
         finally:
-            if proxy_manager and proxy_close:
-                proxy_manager.shutdown_scheduler()
-            if conn is not None:
+            if 'conn' in locals() and conn is not None:
                 conn.close()
 
+    if proxy_manager and proxy_close:
+        proxy_manager.shutdown_scheduler()
+
     if category_tree is None:
-        logger.warning(f'No category tree collected from {main_url}')
+        logger.warning(f"No category tree collected from {main_url}")
         if load_most_recent_if_failed:
             logger.info('Loading most recent category tree...')
             category_tree = load_last_saved_json(f"{data_dir}/{ct_dir}", f"{ct_dir}.json")
-    if save_data:
+    if save_data and category_tree:
         try:
             save_to_file(category_tree, ct_dir, ct_dir, add_date_time=False, separate_folder=False)
         except Exception as e:
@@ -201,32 +243,86 @@ def combine_products_into_tree(category_tree: Dict[str, Any], products_by_catego
         Dict[str, Any]: The combined category tree with products.
     """
     def traverse(node: Dict[str, Any]) -> None:
-        node['products'] = products_by_category.get(node['id'], [])
-        for child in node['children']:
+        node['products'] = products_by_category.get(str(node['id']), [])
+        for child in node.get('children', []):
             traverse(child)
 
     traverse(category_tree)
     return category_tree
 
 
-def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, sort_result: bool = False) -> List[Dict[str, Any]]:
+def find_children_of_leaf(category_tree: Dict[str, Any], leaf_node: int) -> List[Dict[str, Any]]:
+    """
+    Find all child categories of a given leaf node in the category tree.
+
+    Args:
+        category_tree (Dict[str, Any]): The category tree data.
+        leaf_node (int): The ID of the leaf node.
+
+    Returns:
+        List[Dict[str, Any]]: A list of child categories.
+    """
+    data = category_tree.get("data", {}).get("makeSearch", {}).get("categoryTree", [])
+    res = []
+    for category in data:
+        if "category" in category:
+            category_i = category.get("category", {})
+            parent = category_i.get("parent")
+            if not parent or not isinstance(parent, dict):
+                continue
+            else:
+                if parent.get("id") == leaf_node:
+                    child = {
+                        "id": category_i.get("id"),
+                        "productAmount": category.get("total", 0),
+                        "adult": category_i.get("adult", False),
+                        "eco": False,
+                        "iconLink": category_i.get("icon"),
+                        "title": category_i.get("title_ru"),
+                        "titleUz": category_i.get("title_uz"),
+                        "seoMetaTag": category_i.get("seo", {}).get("metaTag"),
+                        "seoHeader": category_i.get("seo", {}).get("header"),
+                        "children": [],
+                        "path": [category_i.get("id")]
+                    }
+                    res.append(child)
+    return res
+
+
+def find_leaf_categories(
+        category_tree: Dict[str, Any],
+        category_tree_gql: Optional[Dict[str, Any]] = None,
+        save_data: bool = True,
+        sort_result: bool = False
+) -> List[Dict[str, Any]]:
     """
     Recursively find all leaf categories in the category tree.
 
     Args:
         category_tree (Dict[str, Any]): The category tree data.
+        category_tree_gql (Optional[Dict[str, Any]], optional): Additional category tree data from GraphQL. Defaults to None.
+        save_data (bool, optional): Whether to save the leaf categories to a file. Defaults to True.
+        sort_result (bool, optional): Whether to sort the resulting leaf categories. Defaults to False.
 
     Returns:
         List[Dict[str, Any]]: List of leaf categories.
     """
-
-    logger.info("Retrieving leaf-categories...")
+    logger.info("Retrieving leaf categories...")
     leaf_categories = []
 
     def traverse(node: Dict[str, Any]) -> None:
         if 'children' in node:
             if not node['children']:
-                leaf_categories.append(node)
+                new_children = None
+                if category_tree_gql is not None:
+                    new_children = find_children_of_leaf(category_tree_gql, node["id"])
+                if new_children:
+                    for child in new_children:
+                        child["path"] = node["path"] + child["path"]
+                        leaf_categories.append(child)
+                    node['children'] = new_children
+                else:
+                    leaf_categories.append(node)
             else:
                 for child in node['children']:
                     traverse(child)
@@ -238,15 +334,14 @@ def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, 
             for item in category_tree['payload']:
                 traverse(item)
         else:
-            logger.warning(
-                "No 'payload' key found in the root of the category tree.")
+            logger.warning("No 'payload' key found in the root of the category tree.")
     except Exception as e:
         logger.error(f"Failed to find leaf categories: {e}")
 
-    if len(leaf_categories) > 0:
+    if leaf_categories:
         if sort_result:
             leaf_categories = sorted(leaf_categories, key=lambda x: x['id'])
-        logger.info(f"Extracted {len(leaf_categories)} categories from root-categories.")
+        logger.info(f"Extracted {len(leaf_categories)} leaf categories from root-categories.")
         if save_data:
             try:
                 save_to_file(leaf_categories, 'leaf_categories', lc_dir, add_date_time=True, separate_folder=False)
@@ -255,46 +350,44 @@ def find_leaf_categories(category_tree: Dict[str, Any], save_data: bool = True, 
     return leaf_categories
 
 
-def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> Dict[str, Any]:
+def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> Optional[Dict[str, Any]]:
     """
     Load the last saved root categories JSON file from the specified directory.
 
     Args:
-        directory (str): The directory containing the JSON files.
+        directory (str, optional): The directory containing the JSON files. Defaults to f'{data_dir}/{rc_dir}'.
 
     Returns:
-        Dict[str, Any]: The root categories data.
+        Optional[Dict[str, Any]]: The root categories data if successful, else None.
     """
     try:
-        list_of_files = glob.glob(os.path.join(
-            directory, 'root_categories_*.json'))
+        list_of_files = glob.glob(os.path.join(directory, 'root_categories_*.json'))
         if not list_of_files:
-            raise FileNotFoundError(
-                "No root_categories files found in the directory.")
+            raise FileNotFoundError("No root_categories files found in the directory.")
 
         latest_file = max(list_of_files, key=os.path.getctime)
 
         with open(latest_file, 'r', encoding='utf-8') as file:
             root_categories = json.load(file)
 
-        logging.info(f'Loaded root-categories from {latest_file}')
+        logger.info(f'Loaded root categories from {latest_file}')
         return root_categories
 
     except Exception as e:
-        logging.error(f'Failed to load the last saved root-categories: {e}')
+        logger.error(f'Failed to load the last saved root categories: {e}')
         return None
 
 
-def find_title_by_id(data, target_id):
+def find_title_by_id(data: Any, target_id: int) -> Optional[str]:
     """
-    Recursively searches for a 'title' associated with a given 'id' in a nested JSON-like structure.
+    Recursively search for a 'title' associated with a given 'id' in a nested JSON-like structure.
 
-    Parameters:
-    - data (dict or list): The JSON-like structure to search.
-    - target_id (int): The ID to find the title for.
+    Args:
+        data (Any): The JSON-like structure to search.
+        target_id (int): The ID to find the title for.
 
     Returns:
-    - str: The title associated with the given ID, or None if not found.
+        Optional[str]: The title associated with the given ID, or None if not found.
     """
     if isinstance(data, dict):
         if data.get('id') == target_id:
@@ -315,15 +408,15 @@ def find_title_by_id(data, target_id):
     return None
 
 
-def add_title_uz(rc1, rc2):
+def add_title_uz(rc1: Any, rc2: Any) -> None:
     """
-    Adds a 'titleUz' key to each item in rc1 with the 'title' from rc2 that has a matching 'id'.
+    Add a 'titleUz' key to each item in rc1 with the 'title' from rc2 that has a matching 'id'.
     Ensures 'titleUz' appears immediately after 'title' in each dictionary. If no match is found
     in rc2, assigns 'N/A' to 'titleUz'.
 
-    Parameters:
-    - rc1 (dict or list): The target JSON-like structure to add 'titleUz' keys.
-    - rc2 (dict or list): The source structure from which to retrieve titles by ID.
+    Args:
+        rc1 (Any): The target JSON-like structure to add 'titleUz' keys.
+        rc2 (Any): The source structure from which to retrieve titles by ID.
     """
     if isinstance(rc1, dict):
         if 'title' in rc1:
@@ -346,34 +439,44 @@ def add_title_uz(rc1, rc2):
             add_title_uz(item, rc2)
 
 
-def get_root_categories(request_retries: int = 8,
-                        backoff_factor: int = 1,
-                        root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
-                        main_url: str = "https://uzum.uz/",
-                        accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
-                        use_direct_connection: bool = True,
-                        proxy_manager=None,
-                        load_most_recent_if_failed: bool = True,
-                        send_to_broker: bool = True,
-                        save_data: bool = True) -> Dict[str, Any]:
+def get_root_categories(
+        request_retries: int = 8,
+        backoff_factor: int = 1,
+        root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
+        main_url: str = "https://uzum.uz/",
+        accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
+        use_direct_connection: bool = True,
+        proxy_manager: Optional[ProxyManager] = None,
+        load_most_recent_if_failed: bool = True,
+        send_to_broker: bool = False,
+        save_data: bool = True
+) -> Dict[str, Any]:
     """
     Fetch root categories from the API, with retries and backoff on failure.
 
     Args:
-        request_retries (int, optional): Number of retries for the request.
-        backoff_factor (int, optional): Backoff factor for retries.
+        request_retries (int, optional): Number of retries for the request. Defaults to 8.
+        backoff_factor (int, optional): Backoff factor for retries. Defaults to 1.
+        root_categories_req_url (str, optional): Root categories API URL. Defaults to "https://api.uzum.uz/api/main/root-categories?eco=false".
+        main_url (str, optional): Main URL of the platform. Defaults to "https://uzum.uz/".
+        accept_lang (List[str], optional): List of accepted languages for the request. Defaults to ['ru-RU', 'uz-UZ'].
+        use_direct_connection (bool, optional): Whether to use direct connection without proxies. Defaults to True.
+        proxy_manager (Optional[ProxyManager], optional): Proxy manager instance. Defaults to None.
+        load_most_recent_if_failed (bool, optional): Whether to load the most recent saved root categories if fetching fails. Defaults to True.
+        send_to_broker (bool, optional): Whether to send the fetched data to a message broker. Defaults to False.
+        save_data (bool, optional): Whether to save the fetched data to a file. Defaults to True.
 
     Returns:
-        Dict[str, Any]: The root categories data.
+        Dict[str, Any]: The fetched root categories data.
     """
     ua = UserAgent()
     host = root_categories_req_url.split('//')[1].split('/')[0]
     endpoint = "/api" + root_categories_req_url.split('api')[-1]
     headers = {
-        'authority': f'{host}',
+        'authority': host,
         'Accept': 'application/json',
         'Accept-Encoding': 'gzip, deflate, br, zstd',
-        'Accept-Language': f'{accept_lang[0]}',
+        'Accept-Language': accept_lang[0],
         'Authorization': 'Bearer ',  # Include the actual token if needed
         'User-Agent': ua.random if ua else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     }
@@ -415,38 +518,38 @@ def get_root_categories(request_retries: int = 8,
                     if not decoded_data:
                         raise ValueError("Empty response data")
                     rc = json.loads(decoded_data)
-                    logger.info(f'Collected root-categories from {main_url}:{headers['Accept-Language']}')
+                    logger.info(f"Collected root categories from {main_url} with Accept-Language: {headers['Accept-Language']}")
                 else:
-                    raise ValueError(f"HTTP error occurred while fetching root-categories: Status code {response.status}")
+                    raise ValueError(f"HTTP error occurred while fetching root categories: Status code {response.status}")
                 if rc:
                     if lang:
                         try:
                             add_title_uz(root_categories['payload'], rc['payload'])
-                            # root_categories = rc
                         except Exception as e:
                             logger.error(f'Error while merging titles: {e}')
                     else:
                         root_categories = rc
             break
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Attempt {request_attempts + 1} failed: {e}")
             request_attempts += 1
             if request_attempts > request_retries:
                 logger.error('Exceeded max number of retries!')
                 break
             wait_with_backoff(request_attempts, backoff_factor)
             if ua is not None:
-                headers['User-Agent'] = f'{ua.random}'
+                headers['User-Agent'] = ua.random
         finally:
-            if proxy_manager and proxy_close:
-                proxy_manager.shutdown_scheduler()
-            if conn is not None:
+            if 'conn' in locals() and conn is not None:
                 conn.close()
 
+    if proxy_manager and proxy_close:
+        proxy_manager.shutdown_scheduler()
+
     if root_categories is None:
-        logger.warning(f'No root-categories collected from {main_url}')
+        logger.warning(f"No root categories collected from {main_url}")
         if load_most_recent_if_failed:
-            logger.info('Loading the most recent root-categories...')
+            logger.info('Loading the most recent root categories...')
             root_categories = load_last_saved_root_categories()
     else:
         if send_to_broker:
@@ -456,17 +559,86 @@ def get_root_categories(request_retries: int = 8,
                 logger.error(f'Failed sending message to RabbitMQ broker: {e}')
         if save_data:
             try:
-                save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
+                save_to_file(root_categories, f"{rc_dir}_s", rc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
                 logger.error(f'Error in get_root_categories: {e}')
     return root_categories
 
 
+def get_all_root_categories(
+        request_retries: int = 8,
+        backoff_factor: int = 1,
+        root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
+        graphql_req_url: str = "https://graphql.uzum.uz/",
+        main_url: str = "https://uzum.uz/",
+        accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
+        use_direct_connection: bool = True,
+        proxy_manager: Optional[ProxyManager] = None,
+        load_most_recent_if_failed: bool = True,
+        send_to_broker: bool = True,
+        save_data: bool = True
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Retrieve all root categories and their leaf categories.
+
+    Args:
+        request_retries (int, optional): Number of retries for requests. Defaults to 8.
+        backoff_factor (int, optional): Backoff factor for retries. Defaults to 1.
+        root_categories_req_url (str, optional): Root categories API URL. Defaults to "https://api.uzum.uz/api/main/root-categories?eco=false".
+        graphql_req_url (str, optional): GraphQL API URL. Defaults to "https://graphql.uzum.uz/".
+        main_url (str, optional): Main URL of the platform. Defaults to "https://uzum.uz/".
+        accept_lang (List[str], optional): List of accepted languages for requests. Defaults to ['ru-RU', 'uz-UZ'].
+        use_direct_connection (bool, optional): Whether to use direct connection without proxies. Defaults to True.
+        proxy_manager (Optional[ProxyManager], optional): Proxy manager instance. Defaults to None.
+        load_most_recent_if_failed (bool, optional): Whether to load the most recent saved data if fetching fails. Defaults to True.
+        send_to_broker (bool, optional): Whether to send the fetched data to a message broker. Defaults to True.
+        save_data (bool, optional): Whether to save the fetched data to files. Defaults to True.
+
+    Returns:
+        Tuple[Dict[str, Any], List[Dict[str, Any]]]: A tuple containing the root categories and the list of leaf categories.
+    """
+    ct = get_category_tree(
+        request_retries=request_retries,
+        backoff_factor=backoff_factor,
+        graphql_req_url=graphql_req_url,
+        main_url=main_url,
+        accept_lang=accept_lang,
+        use_direct_connection=use_direct_connection,
+        proxy_manager=proxy_manager,
+        load_most_recent_if_failed=load_most_recent_if_failed,
+        save_data=save_data
+    )
+    rc = get_root_categories(
+        backoff_factor=backoff_factor,
+        root_categories_req_url=root_categories_req_url,
+        main_url=main_url,
+        accept_lang=accept_lang,
+        use_direct_connection=use_direct_connection,
+        proxy_manager=proxy_manager,
+        load_most_recent_if_failed=load_most_recent_if_failed,
+        send_to_broker=send_to_broker,
+        save_data=save_data
+    )
+    rc_s = rc
+    lc = find_leaf_categories(rc, ct)
+
+    if send_to_broker:
+        try:
+            send_message(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
+        except Exception as e:
+            logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+
+    if save_data:
+        try:
+            save_to_file(rc, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
+        except Exception as e:
+            logger.error(f'Error in get_root_categories: {e}')
+    return rc, rc_s, lc
+
+
 if __name__ == "__main__":
     try:
-        ct = get_category_tree(use_direct_connection=use_direct_connection)
-        # rc = get_root_categories(use_direct_connection=use_direct_connection)
-        # lc = find_leaf_categories(rc)
-
+        get_all_root_categories()
+        # Additional processing can be added here if needed
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->main: {e}")

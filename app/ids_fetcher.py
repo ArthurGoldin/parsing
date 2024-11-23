@@ -100,6 +100,9 @@ class IdsFetcher:
         self.proxy_manager_timeout = proxy_manager_timeout if proxy_manager_timeout is not None else int(self.config.get('ids_fetching', 'proxy_manager_timeout'))
         self.batch_size = batch_size if batch_size is not None else int(self.config.get('ids_fetching', 'batch_size'))
 
+        self.cumulative_save = self.config.getboolean('ids_fetching', 'cumulative_save')
+
+        # Connection variables
         self.conn = None
         self.current_proxy_ip = None
         self.request_counter = 0  # Total number of requests
@@ -297,8 +300,8 @@ class IdsFetcher:
             self.auth_token = self.token_manager.get_token_instance()
             if self.auth_token is None:
                 raise FileNotFoundError("Failed to get authorization token.")
+            self.headers['Authorization'] = f'Bearer {self.auth_token}'
 
-        self.headers['Authorization'] = f'Bearer {self.auth_token}'
         self.headers['User-Agent'] = self.ua.random
 
         host = self.graphql_url.split('//')[1].split('/')[0]
@@ -506,7 +509,8 @@ class IdsFetcher:
             data_list = list(set(data_list))
             self.logger.info(f"Total unique ids: {len(data_list)} in category {category_id}, return status: {status}")
             if save_data:
-                save_to_file(data_list, self.product_ids_dir, self.product_ids_dir, separate_folder=False, override_file=False)
+                if self.cumulative_save:
+                    save_to_file(data_list, self.product_ids_dir, self.product_ids_dir, separate_folder=False, override_file=False)
                 if save_by_category:
                     save_to_file(data_list, f'category_{category_id}_pr_ids', 'products_by_category', separate_folder=False)
         else:
@@ -539,6 +543,7 @@ class IdsFetcher:
 
         self.initialize_managers(**kwargs)
         self.auth_token = self.token_manager.get_token_instance()
+        self.headers['Authorization'] = f"Bearer {self.auth_token}"
         p_ids: List[int] = []
         try:
             if self.auth_token is not None:
@@ -567,7 +572,7 @@ class IdsFetcher:
                 if save_data:
                     if p_ids:
                         self.logger.info(f"Saving ids to {self.product_ids_dir}")
-                        save_to_file(p_ids, f"{self.product_ids_dir}_final", self.product_ids_dir, separate_folder=False, override_file=False)
+                        save_to_file(p_ids, f"{self.product_ids_dir}{"_final" if self.cumulative_save else ""}", self.product_ids_dir, separate_folder=False, override_file=False)
                     if failed_categories:
                         self.logger.info(f"Saving ids to {self.failed_categories_dir}")
                         save_to_file(failed_categories, 'failed_categories_ids', self.failed_categories_dir, separate_folder=False)
@@ -606,7 +611,7 @@ class IdsFetcher:
         Returns:
             List[int]: List of fetched product IDs.
         """
-        self.logger.info("Starting to fetch product IDs for the input categories...")
+        self.logger.info(f"Starting to fetch product IDs for the input categories. Total categories: {len(categories)}.")
         try:
             return self.fetch_product_ids_by_categories(categories, **kwargs)
         except Exception as e:
@@ -629,6 +634,7 @@ class IdsFetcher:
             return categories[ind:]
         elif run_root_categories:
             self.logger.info("No stored categories found. Running 'root_categories' to fetch categories.")
+            # rc, categories = get_all_root_categories()
             rc = get_root_categories()
             categories = find_leaf_categories(rc)
             if categories:
@@ -669,8 +675,12 @@ if __name__ == "__main__":
             categories = loaded_categories
             id_fetcher.logger.info("Starting to fetch IDs from loaded categories")
     else:
-        id_fetcher.logger.error("No categories provided!")
-        id_fetcher.logger.info("Try using -l or --load to load most recent categories. Or provide category IDs to fetch.")
+        id_fetcher.logger.info("No categories provided. Running 'root_categories' to fetch categories.")
+        rc = get_root_categories()
+        categories = find_leaf_categories(rc)
+        ind = args.index if args.index else 0
+        categories = categories[ind:]
+        # id_fetcher.logger.info("Try using -l or --load to load most recent categories. Or provide category IDs to fetch.")
 
     if categories:
         try:

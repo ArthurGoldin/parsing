@@ -84,15 +84,19 @@ class ProductFetcher:
         self.config = configparser.ConfigParser()
         self.config.read(config_path)
 
-        # Initialize attributes
+        # Initialize directories attributes
         self.data_dir = os.path.join(current_dir, self.config.get('storage', 'data_directory'))
         self.product_ids_dir = self.config.get('storage', 'product_ids_sub_dir')
         self.products_dir = self.config.get('storage', 'products_sub_dir')
         self.images_dir = self.config.get('storage', 'images_sub_dir')
         self.proxy_dir = self.config.get('storage', 'proxy_dir')
 
+        # URL
         self.main_url = self.config.get('urls', 'main_url')
         self.product_api_url = self.config.get('urls', 'product_api_url')
+
+        # Accept language
+        self.accept_language = 'ru-RU' if 'ru' in str.lower(self.config.get('product_fetching', 'language')) else 'uz-UZ'
 
         # Broker connection
         self.broker_host = self.config.get('broker', 'host')
@@ -128,7 +132,7 @@ class ProductFetcher:
             'scheme': 'https',
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Accept-Language': 'ru-RU',
+            'Accept-Language': self.accept_language,
             'Authorization': 'Bearer ',
             'Content-Type': 'application/json',
             'Origin': self.main_url,
@@ -222,7 +226,8 @@ class ProductFetcher:
             }
 
         def get_image_url(data: Dict[str, Any], img_type: str = 'high') -> str:
-            img_res = ['800', '720', '480', '240', '120', '80', '24034']
+            img_res = ['240', '120', '480', '720', '800', '24034', '80']
+
             for i in img_res:
                 try:
                     img_url = data.get(i, {}).get(img_type, {})
@@ -256,11 +261,14 @@ class ProductFetcher:
                 brand = find_keywords_in_title(payload.get('title'), brand_keywords) if brand_keywords else []
 
             # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
+            image_path = "N/A"
             img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
             if img_url:
                 try:
                     obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
-                    upload_image_from_url(image_url=img_url, object_key=obj_key)
+                    res = upload_image_from_url(image_url=img_url, object_key=obj_key)
+                    if res:
+                        image_path = res["url"] if res["url"] is not None else "N/A"
                 except Exception as e:
                     self.logger.error(f"Failed to upload an image: {e}")
 
@@ -280,8 +288,8 @@ class ProductFetcher:
                 'ordersAmount': payload.get('ordersAmount'),
                 'totalAvailableAmount': payload.get('totalAvailableAmount'),
                 'url': f'{self.main_url}/product/{payload.get("id")}',
-                # 'photo': image_path,
-                'photo': payload.get('photos', [{}])[0].get('photo', {}).get('800', {}).get('high'),
+                'photo': image_path,
+                # 'photo': payload.get('photos', [{}])[0].get('photo', {}).get('800', {}).get('high'),
                 'skuList': [{
                     'characteristics': [{
                         'id': characteristic_data[char.get('charIndex')]['id'],
@@ -684,7 +692,7 @@ if __name__ == "__main__":
         product_fetcher.logger.info("Try using -l or --load to load most recent IDs. Or provide product ID(s) to parse specific product(s).")
 
     if product_list:
-        product_fetcher.logger.info("Starting to parse products from the input...")
+        product_fetcher.logger.info(f"Starting to parse products from the input. Data language: {product_fetcher.accept_language.split("-")[1]}")
         try:
             # fetched_data, failed_ids, status = product_fetcher.run(product_list)
             status, ind = product_fetcher.run(product_list, args.index if args.index else 0)

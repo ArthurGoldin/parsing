@@ -3,6 +3,7 @@ __pycache__/
 .venv
 .DS_Store
 celery
+ToDO.txt
 
 app/old
 app/data
