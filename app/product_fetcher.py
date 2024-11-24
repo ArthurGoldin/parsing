@@ -479,7 +479,7 @@ class ProductFetcher:
                             raise ValueError("Empty response data from product API")
 
                         json_data = json.loads(decoded_data)
-                        # save_to_file(json_data, "pr_response_557141", "")
+                        # save_to_file(json_data, f"pr_response_{product_id}", "")
                         if 'errors' in json_data:
                             save_data_to(json_data, f"response_error_{product_id}")
                             # save_to_file(json_data, f"response_error_{product_id}", "products")
