@@ -13,6 +13,8 @@ import uuid
 import http.client
 import base64
 import os
+# import zipfile
+# import string
 from enum import Enum
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -31,41 +33,6 @@ except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
-# # Configure logging
-# try:
-#     logging.config.fileConfig('configs/logging.conf')
-#     logger = logging.getLogger('proxy_manager')
-# except Exception as e:
-#     logging.basicConfig(level=logging.INFO)
-#     logger = logging.getLogger()
-#     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
-
-
-# Initialize the scheduler with a SQLAlchemy job store (optional for persistence)
-# from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-# jobstores = {
-#     'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
-# }
-# scheduler = BackgroundScheduler(jobstores=jobstores)
-
-
-# scheduler = BackgroundScheduler()
-# try:
-#     scheduler.start()
-#     logger.info("Scheduler started successfully.")
-# except Exception as e:
-#     logger.error(f"Failed to start scheduler: {e}")
-#     raise
-
-# # Register a shutdown hook
-# def shutdown_scheduler():
-#     try:
-#         scheduler.shutdown(wait=False)
-#         logger.info("Scheduler shut down successfully via atexit.")
-#     except Exception as e:
-#         logger.error(f"Error shutting down scheduler: {e}")
-
-# atexit.register(shutdown_scheduler)
 
 
 class ProxyUnavailableError(Exception):
@@ -326,6 +293,8 @@ class ProxyManager:
         self.proxies: List[Proxy] = []
         self._manager_lock = threading.Lock()  # To handle concurrent access
         self.proxy_available = threading.Condition(self._manager_lock)
+
+        self.extension_cache: Dict[str, str] = {}  # Maps 'ip_scheme' to extension path
 
         self.scheduler = BackgroundScheduler(timezone=timezone.utc)
         try:
@@ -875,6 +844,125 @@ class ProxyManager:
         Returns a string representation of the ProxyManager instance, including all managed proxies.
         """
         return f"ProxyManager(proxies={self.proxies})"
+
+    # def create_proxy_auth_extension(
+    #     self,
+    #     proxy: Proxy,
+    #     scheme: str = 'https',  # Default to 'https' if not specified
+    #     extension_dir: Optional[str] = None
+    # ) -> Optional[str]:
+    #     """
+    #     Creates a Chrome extension for proxy authentication for the given Proxy instance.
+
+    #     Args:
+    #         proxy (Proxy): The Proxy instance for which to create the extension.
+    #         scheme (str): The proxy scheme ('http' or 'https').
+    #         extension_dir (Optional[str]): Directory to store the extension files.
+    #                                     If None, defaults to a subdirectory in current_dir.
+
+    #     Returns:
+    #         Optional[str]: Path to the zipped extension if successful, else None.
+    #     """
+    #     import string
+
+    #     if scheme not in ['http', 'https']:
+    #         logger.error(f"Invalid proxy scheme '{scheme}'. Must be 'http' or 'https'.")
+    #         return None
+
+    #     # Create a unique directory for each proxy based on its IP, port, and scheme
+    #     proxy_identifier = f"{proxy.ip}_{proxy.ports.get(scheme, 8013)}"
+    #     if proxy_identifier in self.extension_cache:
+    #         logger.debug(f"Using cached extension for proxy {proxy.ip} with scheme {scheme}")
+    #         return self.extension_cache[proxy_identifier]
+
+    #     if extension_dir is None:
+    #         extension_dir = os.path.join(current_dir, 'proxy/proxy_auth_extensions')
+
+    #     proxy_extension_dir = os.path.join(extension_dir, proxy_identifier)
+    #     os.makedirs(proxy_extension_dir, exist_ok=True)
+
+    #     manifest_json = """
+    #     {
+    #         "version": "1.0.0",
+    #         "manifest_version": 2,
+    #         "name": "Proxy Authentication",
+    #         "permissions": [
+    #             "proxy",
+    #             "tabs",
+    #             "unlimitedStorage",
+    #             "storage",
+    #             "<all_urls>",
+    #             "webRequest",
+    #             "webRequestBlocking"
+    #         ],
+    #         "background": {
+    #             "scripts": ["background.js"]
+    #         },
+    #         "minimum_chrome_version": "22.0.0"
+    #     }
+    #     """
+
+    #     background_js_template = string.Template("""
+    #     var config = {
+    #         mode: "fixed_servers",
+    #         rules: {
+    #             singleProxy: {
+    #                 scheme: "$PROXY_SCHEME",
+    #                 host: "$PROXY_HOST",
+    #                 port: $PROXY_PORT
+    #             },
+    #             bypassList: ["localhost"]
+    #         }
+    #     };
+
+    #     chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+    #     function callbackFn(details) {
+    #         return {
+    #             authCredentials: {
+    #                 username: "$PROXY_USERNAME",
+    #                 password: "$PROXY_PASSWORD"
+    #             }
+    #         };
+    #     }
+
+    #     chrome.webRequest.onAuthRequired.addListener(
+    #         callbackFn,
+    #         {urls: ["<all_urls>"]},
+    #         ['blocking']
+    #     );
+    #     """)
+
+    #     # Substitute placeholders with actual proxy details
+    #     background_js = background_js_template.substitute(
+    #         PROXY_SCHEME=scheme,
+    #         PROXY_HOST=proxy.ip,
+    #         PROXY_PORT=proxy.ports.get(scheme, 8013),  # Use the port corresponding to the scheme
+    #         PROXY_USERNAME=proxy.user,
+    #         PROXY_PASSWORD=proxy.password
+    #     )
+
+    #     # Write manifest.json and background.js
+    #     manifest_path = os.path.join(proxy_extension_dir, 'manifest.json')
+    #     background_path = os.path.join(proxy_extension_dir, 'background.js')
+
+    #     with open(manifest_path, 'w') as mf:
+    #         mf.write(manifest_json)
+
+    #     with open(background_path, 'w') as bf:
+    #         bf.write(background_js)
+
+    #     # Zip the extension
+    #     extension_zip_path = os.path.join(proxy_extension_dir, 'proxy_auth_extension.zip')
+    #     try:
+    #         with zipfile.ZipFile(extension_zip_path, 'w') as zp:
+    #             zp.write(manifest_path, 'manifest.json')
+    #             zp.write(background_path, 'background.js')
+    #         logger.info(f"Proxy authentication extension created at {extension_zip_path}")
+    #         return extension_zip_path
+    #     except Exception as e:
+    #         logger.error(f"Failed to create proxy authentication extension for {proxy.ip}: {e}")
+    #         return None
 
 
 def convert_to_unix_timestamp(date_str: str) -> float:

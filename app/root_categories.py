@@ -1,11 +1,12 @@
-import argparse
+# import argparse
+# import uuid
+import copy
 import configparser
 import brotli
 import zlib
 import logging.config
 import json
 import time
-import uuid
 import http.client
 import glob
 import os
@@ -42,6 +43,8 @@ rc_dir = config.get('storage', 'root_categories_sub_dir')
 lc_dir = config.get('storage', 'category_ids_sub_dir')
 ct_dir = config.get('storage', 'category_tree_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
+
+main_url = config.get('urls', 'main_url')
 
 broker_host = config.get('broker', 'host')
 broker_port = config.getint('broker', 'port')
@@ -102,13 +105,34 @@ def get_response(headers: Dict[str, str], proxy_manager: Optional[ProxyManager] 
     pass
 
 
+def initialize_managers(proxy_manager: ProxyManager = None, token_manager: TokenManager = None, use_direct_connection: bool = use_direct_connection, **kwargs) -> bool:
+    proxy_close = False
+    if not proxy_manager and not use_direct_connection:
+        logger.debug("Initializing ProxyManager in root_categories")
+        proxy_manager = ProxyManager.from_json_file(proxy_dir)
+        proxy_close = True
+    if not token_manager:
+        logger.debug("Initializing TokenManager in root_categories")
+        token_manager = TokenManager(
+            url=main_url,
+            max_retries=kwargs.get('token_retries', 5),
+            save_token=kwargs.get('save_token', False),
+            save_cookies=False
+        )
+        auth_token = token_manager.get_token_instance()
+        if auth_token is None:
+            raise FileNotFoundError("Failed to get authorization token.")
+    return proxy_manager, token_manager, proxy_close
+
+
 def get_category_tree(
+        proxy_manager: Optional[ProxyManager] = None,
+        token_manager: Optional[TokenManager] = None,
         request_retries: int = 8,
         backoff_factor: int = 1,
         graphql_req_url: str = "https://graphql.uzum.uz/",
         main_url: str = "https://uzum.uz/",
         use_direct_connection: bool = True,
-        proxy_manager: Optional[ProxyManager] = None,
         load_most_recent_if_failed: bool = True,
         save_data: bool = True,
         **kwargs) -> Dict[str, Any]:
@@ -128,17 +152,8 @@ def get_category_tree(
     Returns:
         Dict[str, Any]: The fetched category tree data.
     """
-    logger.info("Initiating TokenManager in 'root_categories'.")
-    token_manager = TokenManager(
-        url=main_url,
-        max_retries=kwargs.get('token_retries', 5),
-        save_token=kwargs.get('save_token', False),
-        save_cookies=False
-    )
-    auth_token = token_manager.get_token_instance()
-    if auth_token is None:
-        raise FileNotFoundError("Failed to get authorization token.")
-
+    proxy_manager, token_manager, proxy_close = initialize_managers(proxy_manager, token_manager, use_direct_connection)
+    auth_token = token_manager.get_token()
     ua = UserAgent()
     host = graphql_req_url.split('//')[1].split('/')[0]
     endpoint = "/"
@@ -163,15 +178,14 @@ def get_category_tree(
     payload_json = load_json(f"{graphql_dir}/{ct_dir}.json")
 
     category_tree = None
-    proxy_close = False
     request_attempts = 0
 
-    if use_direct_connection:
-        proxy_manager = None
-    else:
-        if proxy_manager is None:
-            proxy_manager = ProxyManager.from_json_file(proxy_dir)
-            proxy_close = True
+    # if use_direct_connection:
+    #     proxy_manager = None
+    # else:
+    #     if proxy_manager is None:
+    #         proxy_manager = ProxyManager.from_json_file(proxy_dir)
+    #         proxy_close = True
 
     while request_attempts <= request_retries:
         try:
@@ -440,13 +454,13 @@ def add_title_uz(rc1: Any, rc2: Any) -> None:
 
 
 def get_root_categories(
+        proxy_manager: Optional[ProxyManager] = None,
         request_retries: int = 8,
         backoff_factor: int = 1,
         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
         main_url: str = "https://uzum.uz/",
         accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
         use_direct_connection: bool = True,
-        proxy_manager: Optional[ProxyManager] = None,
         load_most_recent_if_failed: bool = True,
         send_to_broker: bool = False,
         save_data: bool = True
@@ -559,25 +573,26 @@ def get_root_categories(
                 logger.error(f'Failed sending message to RabbitMQ broker: {e}')
         if save_data:
             try:
-                save_to_file(root_categories, f"{rc_dir}_s", rc_dir, add_date_time=True, separate_folder=False)
+                save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
                 logger.error(f'Error in get_root_categories: {e}')
     return root_categories
 
 
 def get_all_root_categories(
+        proxy_manager: Optional[ProxyManager] = None,
+        token_manager: Optional[TokenManager] = None,
         request_retries: int = 8,
         backoff_factor: int = 1,
         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
         graphql_req_url: str = "https://graphql.uzum.uz/",
         main_url: str = "https://uzum.uz/",
         accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
-        use_direct_connection: bool = True,
-        proxy_manager: Optional[ProxyManager] = None,
+        use_direct_connection: bool = use_direct_connection,
         load_most_recent_if_failed: bool = True,
         send_to_broker: bool = True,
         save_data: bool = True
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Retrieve all root categories and their leaf categories.
 
@@ -597,43 +612,53 @@ def get_all_root_categories(
     Returns:
         Tuple[Dict[str, Any], List[Dict[str, Any]]]: A tuple containing the root categories and the list of leaf categories.
     """
-    ct = get_category_tree(
-        request_retries=request_retries,
-        backoff_factor=backoff_factor,
-        graphql_req_url=graphql_req_url,
-        main_url=main_url,
-        accept_lang=accept_lang,
-        use_direct_connection=use_direct_connection,
-        proxy_manager=proxy_manager,
-        load_most_recent_if_failed=load_most_recent_if_failed,
-        save_data=save_data
-    )
-    rc = get_root_categories(
-        backoff_factor=backoff_factor,
-        root_categories_req_url=root_categories_req_url,
-        main_url=main_url,
-        accept_lang=accept_lang,
-        use_direct_connection=use_direct_connection,
-        proxy_manager=proxy_manager,
-        load_most_recent_if_failed=load_most_recent_if_failed,
-        send_to_broker=send_to_broker,
-        save_data=save_data
-    )
-    rc_s = rc
-    lc = find_leaf_categories(rc, ct)
+    proxy_manager, token_manager, proxy_close = initialize_managers(proxy_manager, token_manager, use_direct_connection)
+    try:
+        ct = get_category_tree(
+            proxy_manager=proxy_manager,
+            token_manager=token_manager,
+            request_retries=request_retries,
+            backoff_factor=backoff_factor,
+            graphql_req_url=graphql_req_url,
+            main_url=main_url,
+            accept_lang=accept_lang,
+            use_direct_connection=use_direct_connection,
+            load_most_recent_if_failed=load_most_recent_if_failed,
+            save_data=save_data
+        )
+        rc = get_root_categories(
+            proxy_manager=proxy_manager,
+            backoff_factor=backoff_factor,
+            root_categories_req_url=root_categories_req_url,
+            main_url=main_url,
+            accept_lang=accept_lang,
+            use_direct_connection=use_direct_connection,
+            load_most_recent_if_failed=load_most_recent_if_failed,
+            send_to_broker=False,
+            save_data=save_data
+        )
 
-    if send_to_broker:
-        try:
-            send_message(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
-        except Exception as e:
-            logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+        rc_s = copy.deepcopy(rc)
 
-    if save_data:
-        try:
-            save_to_file(rc, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
-        except Exception as e:
-            logger.error(f'Error in get_root_categories: {e}')
-    return rc, rc_s, lc
+        find_leaf_categories(rc, ct)
+
+        if send_to_broker:
+            try:
+                send_message(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
+            except Exception as e:
+                logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+
+        if save_data:
+            try:
+                save_to_file(rc, f"{rc_dir}_extnd", rc_dir, add_date_time=True, separate_folder=False)
+            except Exception as e:
+                logger.error(f'Error in get_all_root_categories: {e}')
+    except Exception as e:
+        logger.error(f"Error in get_all_root_categories: {e}")
+    finally:
+        if proxy_close and proxy_manager is not None:
+            proxy_manager.shutdown_scheduler()
+    return rc, rc_s
 
 
 if __name__ == "__main__":

@@ -8,12 +8,14 @@ import logging.config
 import sys
 from typing import List, Any
 
+from app.token_manager import TokenManager
 import root_categories
 import configparser
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
 from save_and_load_data import load_last_saved_json
 from brands_crawler import run_brands_crawler
+from proxy_manager import ProxyManager
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -45,6 +47,8 @@ data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = config.get('storage', 'brands_sub_dir')
 product_ids_dir = config.get('storage', 'product_ids_sub_dir')
 products_dir = config.get('storage', 'products_sub_dir')
+root_categories_dir = config.get('storage', 'root_categories_sub_dir')
+proxy_dir = config.get('storage', 'proxy_dir')
 
 data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 if not os.path.exists(data_dir):
@@ -59,18 +63,24 @@ def fetch_data() -> None:
     """
     start_time = time.time()
 
+    token_manager = None
+    proxy_manager = None
     try:
-        _, rc_s, _ = root_categories.get_all_root_categories()
-        if rc_s is None:
+        proxy_manager = ProxyManager().from_json_file(proxy_dir)
+        token_manager = TokenManager(proxy_manager=proxy_manager)
+
+        rc, rc_s = root_categories.get_all_root_categories(proxy_manager=proxy_manager, token_manager=token_manager)
+        if rc is None or rc_s is None:
             raise FileNotFoundError("Failed to load root-categories.")
 
+        # rc_s = load_last_saved_json(f"{data_dir}/{root_categories_dir}", root_categories_dir)
         lc = root_categories.find_leaf_categories(rc_s)
         if not lc:
             raise AttributeError("Leaf categories not found")
 
         logger.info("Retrieving IDs...")
 
-        ids_fetcher = IdsFetcher()
+        ids_fetcher = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
         p_ids = ids_fetcher.run(lc)
         if p_ids is None:
             raise FileNotFoundError("Failed to retrieve product IDs.")
@@ -82,7 +92,7 @@ def fetch_data() -> None:
             run_brands_crawler()
 
         logger.info('Parsing products...')
-        product_fetcher = ProductFetcher()
+        product_fetcher = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
         products, failed_products_ids, status = product_fetcher.run(p_ids)
         # products, failed_products_ids, status = product_parser.fetch_products(p_ids)
         logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
@@ -90,6 +100,8 @@ def fetch_data() -> None:
     except Exception as e:
         logger.error(f"Could not fetch data: {e}. Exiting...")
     finally:
+        if proxy_manager is not None:
+            proxy_manager.shutdown_scheduler()
         end_time = time.time()
         logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")
 

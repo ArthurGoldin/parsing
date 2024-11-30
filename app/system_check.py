@@ -10,6 +10,7 @@ import root_categories
 from save_and_load_data import save_to_file, load_json
 import configparser
 from token_manager import TokenManager
+from proxy_manager import ProxyManager
 # import send_data_to_db
 
 from ids_fetcher import IdsFetcher
@@ -85,7 +86,7 @@ validate_config()
 
 # Retrieve storage configurations
 # data_dir = get_config('storage', 'data_directory')
-data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
+# data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = get_config('storage', 'brands_sub_dir')
 category_ids_dir = get_config('storage', 'category_ids_sub_dir')
 check_dir = get_config('storage', 'check_sub_dir')
@@ -96,6 +97,7 @@ products_dir = get_config('storage', 'products_sub_dir')
 root_categories_dir = get_config('storage', 'root_categories_sub_dir')
 token_dir = get_config('storage', 'token_sub_dir')
 def_pr_name = get_config('storage', 'def_product_name')
+proxy_dir = config.get('storage', 'proxy_dir')
 
 # Retrieve URLs configurations
 main_url = get_config('urls', 'main_url')
@@ -115,102 +117,106 @@ def run_system_check(host_name=broker_host, port=broker_port):
     logger.info('Starting a system check...')
     res_stats = {}
 
+    token_manager = None
+    proxy_manager = None
     try:
-        logger.info('Checking token_manager...')
-        token_manager = TokenManager(
-            url=main_url,
-            max_retries=5,
-            save_token=False,
-            save_cookies=False
-        )
-        auth_token = token_manager.get_token_instance()
-        if not auth_token:
-            res_stats["auth_token"] = "FAILED"
-        else:
-            res_stats["auth_token"] = "PASSED"
-        logger.info(f'auth_token: {res_stats["auth_token"]}')
-    except Exception as e:
-        res_stats["auth_token"] = "ERROR"
-        logger.error(f"Error in token_manager: {e}")
+        proxy_manager = ProxyManager().from_json_file(proxy_dir)
+        try:
+            logger.info('Checking token_manager...')
+            token_manager = TokenManager(proxy_manager=proxy_manager)
+            auth_token = token_manager.get_token_instance()
+            if not auth_token:
+                res_stats["auth_token"] = "FAILED"
+            else:
+                res_stats["auth_token"] = "PASSED"
+            logger.info(f'auth_token: {res_stats["auth_token"]}')
+        except Exception as e:
+            res_stats["auth_token"] = "ERROR"
+            logger.error(f"Error in token_manager: {e}")
 
-    try:
-        logger.info('Checking root_categories...')
-        rc = root_categories.get_root_categories(save_data=False)
-        if rc is None:
-            res_stats["root_categories"] = "FAILED"
-        else:
-            res_stats["root_categories"] = "PASSED"
-        logger.info(f'root_categories: {res_stats["root_categories"]}')
-    except Exception as e:
-        res_stats["root_categories"] = "ERROR"
-        logger.error(f"Error in root_categories: {e}")
+        try:
+            logger.info('Checking root_categories...')
+            rc = root_categories.get_root_categories(proxy_manager=proxy_manager, save_data=False)
+            if rc is None:
+                res_stats["root_categories"] = "FAILED"
+            else:
+                res_stats["root_categories"] = "PASSED"
+            logger.info(f'root_categories: {res_stats["root_categories"]}')
+        except Exception as e:
+            res_stats["root_categories"] = "ERROR"
+            logger.error(f"Error in root_categories: {e}")
 
-    try:
-        logger.info('Checking category tree request with GraphQl...')
-        ct = root_categories.get_category_tree(save_data=False)
-        if ct is None:
-            res_stats["root_categories(GraphQL request)"] = "FAILED"
-        else:
-            res_stats["root_categories(GraphQL request)"] = "PASSED"
-        logger.info(f'root_categories(GraphQL request): {res_stats["root_categories(GraphQL request)"]}')
-    except Exception as e:
-        res_stats["root_categories(GraphQL request)"] = "ERROR"
-        logger.error(f"Error in root_categories(GraphQL request): {e}")
+        try:
+            logger.info('Checking category tree request with GraphQl...')
+            ct = root_categories.get_category_tree(save_data=False)
+            if ct is None:
+                res_stats["root_categories(GraphQL request)"] = "FAILED"
+            else:
+                res_stats["root_categories(GraphQL request)"] = "PASSED"
+            logger.info(f'root_categories(GraphQL request): {res_stats["root_categories(GraphQL request)"]}')
+        except Exception as e:
+            res_stats["root_categories(GraphQL request)"] = "ERROR"
+            logger.error(f"Error in root_categories(GraphQL request): {e}")
 
-    try:
-        logger.info('Checking leaf_categories...')
-        leaf_categories = root_categories.find_leaf_categories(rc, save_data=False)
-        if not leaf_categories:
-            res_stats["leaf_categories"] = "Failed"
-        else:
-            res_stats["leaf_categories"] = "PASSED"
-        logger.info(f'leaf_categories: {res_stats["leaf_categories"]}')
-    except Exception as e:
-        res_stats["leaf_categories"] = "ERROR"
-        logger.error(f"Error in leaf_categories: {e}")
+        try:
+            logger.info('Checking leaf_categories...')
+            leaf_categories = root_categories.find_leaf_categories(rc, save_data=False)
+            if not leaf_categories:
+                res_stats["leaf_categories"] = "Failed"
+            else:
+                res_stats["leaf_categories"] = "PASSED"
+            logger.info(f'leaf_categories: {res_stats["leaf_categories"]}')
+        except Exception as e:
+            res_stats["leaf_categories"] = "ERROR"
+            logger.error(f"Error in leaf_categories: {e}")
 
-    try:
-        logger.info('Checking product_ids...')
-        product_ids = IdsFetcher()
-        p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
-        if p_ids is None:
-            res_stats["product_ids"] = "FAILED"
-        else:
-            res_stats["product_ids"] = "PASSED"
-        logger.info(f'product_ids: {res_stats["product_ids"]}')
-    except Exception as e:
-        res_stats["product_ids"] = "ERROR"
-        logger.error(f"Error in product_ids: {e}")
+        try:
+            logger.info('Checking product_ids...')
+            product_ids = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
+            p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
+            if p_ids is None:
+                res_stats["product_ids"] = "FAILED"
+            else:
+                res_stats["product_ids"] = "PASSED"
+            logger.info(f'product_ids: {res_stats["product_ids"]}')
+        except Exception as e:
+            res_stats["product_ids"] = "ERROR"
+            logger.error(f"Error in product_ids: {e}")
 
-    try:
-        logger.info('Checking product_parser...')
-        product_parser = ProductFetcher()
-        # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
-        status, _ = product_parser.fetch_products(
-            [p_ids[0]] if p_ids else [1106551],
-            save_data=False,
-            send_to_db=False
-        )
-        if status != 0:
-            res_stats["product_parser"] = "FAILED"
-        else:
-            res_stats["product_parser"] = "PASSED"
-        logger.info(f'product_parser: {res_stats["product_parser"]}; return status: {status}')
-    except Exception as e:
-        res_stats["product_parser"] = "ERROR"
-        logger.error(f"Error in product_parser: {e}")
+        try:
+            logger.info('Checking product_parser...')
+            product_parser = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
+            # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
+            status, _ = product_parser.fetch_products(
+                [p_ids[0]] if p_ids else [1106551],
+                save_data=False,
+                send_to_db=False
+            )
+            if status != 0:
+                res_stats["product_parser"] = "FAILED"
+            else:
+                res_stats["product_parser"] = "PASSED"
+            logger.info(f'product_parser: {res_stats["product_parser"]}; return status: {status}')
+        except Exception as e:
+            res_stats["product_parser"] = "ERROR"
+            logger.error(f"Error in product_parser: {e}")
 
-    # try:
-    #     logger.info('Checking RabbitMQ messaging...')
-    #     message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
-    #     if not message_send_res:
-    #         res_stats["send_message"] = "FAILED"
-    #     else:
-    #         res_stats["send_message"] = "PASSED"
-    #     logger.info(f'send_message: {res_stats["send_message"]}')
-    # except Exception as e:
-    #     res_stats["send_message"] = "ERROR"
-    #     logger.error(f"Error in send_message: {e}")
+        # try:
+        #     logger.info('Checking RabbitMQ messaging...')
+        #     message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
+        #     if not message_send_res:
+        #         res_stats["send_message"] = "FAILED"
+        #     else:
+        #         res_stats["send_message"] = "PASSED"
+        #     logger.info(f'send_message: {res_stats["send_message"]}')
+        # except Exception as e:
+        #     res_stats["send_message"] = "ERROR"
+        #     logger.error(f"Error in send_message: {e}")
+    except Exception as e:
+        logger.error(f"System check: {e}")
+    finally:
+        if proxy_manager is not None:
+            proxy_manager.shutdown_scheduler()
 
     end_time = time.time()
     logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")

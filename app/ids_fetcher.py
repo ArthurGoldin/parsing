@@ -1,5 +1,6 @@
 import argparse
 import configparser
+import token
 import brotli
 import zlib
 import logging.config
@@ -49,6 +50,8 @@ class IdsFetcher:
     """
 
     def __init__(self,
+                 proxy_manager: Optional[ProxyManager] = None,
+                 token_manager: Optional[TokenManager] = None,
                  config_path: str = config_path,
                  logging_path: str = logging_config_path,
                  offset_limit: Optional[int] = None,
@@ -108,9 +111,10 @@ class IdsFetcher:
         self.request_counter = 0  # Total number of requests
 
         # Managers
-        self.token_manager: Optional[TokenManager] = None
-        self.proxy_manager: Optional[ProxyManager] = None
-        self.auth_token: Optional[str] = None
+        self.proxy_manager: Optional[ProxyManager] = proxy_manager
+        self.shut_down_proxy_scheduler = False if proxy_manager is not None else True
+        self.token_manager: Optional[TokenManager] = token_manager
+        self.auth_token: Optional[str] = self.token_manager.get_token_instance() if token_manager is not None else None
 
         self.ua = UserAgent()
 
@@ -119,7 +123,7 @@ class IdsFetcher:
             'Accept-Language': 'ru-RU',
             'apollographql-client-name': 'web-customers',
             'apollographql-client-version': '1.25.2',
-            'Authorization': 'Bearer',
+            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
             'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
             'Content-Type': 'application/json',
             'Origin': self.main_url,
@@ -191,6 +195,9 @@ class IdsFetcher:
             token_retries (int, optional): Maximum retries for the TokenManager. Defaults to 5.
             save_token (bool, optional): Whether to save the token. Defaults to False.
         """
+        if not self.proxy_manager and not self.use_direct_connection:
+            self.logger.debug("Initializing ProxyManager in IdsFetcher")
+            self.proxy_manager = ProxyManager.from_json_file(self.proxy_dir)
         if not self.token_manager:
             self.logger.debug("Initializing TokenManager in IdsFetcher")
             self.token_manager = TokenManager(
@@ -199,9 +206,10 @@ class IdsFetcher:
                 save_token=kwargs.get('save_token', False),
                 save_cookies=False
             )
-        if not self.proxy_manager and not self.use_direct_connection:
-            self.logger.debug("Initializing ProxyManager in IdsFetcher")
-            self.proxy_manager = ProxyManager.from_json_file(self.proxy_dir)
+            self.auth_token = self.token_manager.get_token_instance()
+            if self.auth_token is None:
+                raise FileNotFoundError("Failed to get authorization token.")
+            self.headers['Authorization'] = f'Bearer {self.auth_token}'
 
     def decompress_http_response(self, response_data: bytes, encoding: str) -> bytes:
         """
@@ -296,12 +304,6 @@ class IdsFetcher:
         """
         self.initialize_managers()
 
-        if self.auth_token is None:
-            self.auth_token = self.token_manager.get_token_instance()
-            if self.auth_token is None:
-                raise FileNotFoundError("Failed to get authorization token.")
-            self.headers['Authorization'] = f'Bearer {self.auth_token}'
-
         self.headers['User-Agent'] = self.ua.random
 
         host = self.graphql_url.split('//')[1].split('/')[0]
@@ -375,7 +377,7 @@ class IdsFetcher:
                     self.logger.debug("Picking a proxy and establishing a connection")
                     self.conn, self.current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
                 except Exception:
-                    self.logger.warning("No proxy connection! Establishing direct connection to {host}")
+                    self.logger.warning(f"No proxy connection! Establishing direct connection to {host}")
                     self.conn = direct_connection()
                     self.current_proxy_ip = None
             else:
@@ -415,10 +417,13 @@ class IdsFetcher:
                         if 'errors' in json_data:
                             error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                             error_429 = False
+                            error_401 = False
                             for error_message in error_messages:
                                 self.logger.warning(f'GraphQL Error: {error_message}')
                                 if '429' in error_message:
                                     error_429 = True
+                                if '401' in error_message:
+                                    error_401 = True
 
                             if error_429:
                                 retry_time = int(response.headers.get("Retry-After", 1))
@@ -431,7 +436,18 @@ class IdsFetcher:
 
                                 request_attempts += 1
                                 continue
-
+                            if error_401:  # Authorization failed
+                                self.logger.warning(f"{response.status}: Authorization failed during the GraphQL request from an error message; retrieving a new token...")
+                                self.auth_token = self.token_manager.get_token_instance()
+                                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                                request_attempts += 1
+                                if request_attempts > 1:
+                                    # conn, current_proxy_ip = make_connection()
+                                    make_connection()
+                                else:
+                                    # conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                                    make_connection(put_to_sleep=False)
+                                continue
                         data = self.get_ids_from_json(json_data)
                         if amount == 0:
                             amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
@@ -542,8 +558,7 @@ class IdsFetcher:
         start_time = time.time()
 
         self.initialize_managers(**kwargs)
-        self.auth_token = self.token_manager.get_token_instance()
-        self.headers['Authorization'] = f"Bearer {self.auth_token}"
+
         p_ids: List[int] = []
         try:
             if self.auth_token is not None:
@@ -585,7 +600,7 @@ class IdsFetcher:
         except Exception as e:
             self.logger.error(f"In 'fetch_product_ids_by_category': {e}")
         finally:
-            if self.proxy_manager:
+            if self.proxy_manager and self.shut_down_proxy_scheduler:
                 self.logger.debug(f"In {__file__}: Closing proxy_manager scheduler.")
                 self.proxy_manager.shutdown_scheduler()
             if self.conn:

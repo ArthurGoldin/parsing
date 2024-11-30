@@ -53,6 +53,8 @@ class ProductFetcher:
     """
 
     def __init__(self,
+                 proxy_manager: Optional[ProxyManager] = None,
+                 token_manager: Optional[TokenManager] = None,
                  config_path: str = config_path,
                  logging_path: str = logging_config_path,
                  use_direct_connection: Optional[bool] = None,
@@ -119,9 +121,10 @@ class ProductFetcher:
         )
 
         # Managers
-        self.token_manager: Optional[TokenManager] = None
-        self.proxy_manager: Optional[ProxyManager] = None
-        self.auth_token: Optional[str] = None
+        self.proxy_manager: Optional[ProxyManager] = proxy_manager
+        self.shut_down_proxy_scheduler = False if proxy_manager is not None else True
+        self.token_manager: Optional[TokenManager] = token_manager
+        self.auth_token: Optional[str] = self.token_manager.get_token_instance() if token_manager is not None else None
 
         self.ua = UserAgent()
 
@@ -133,7 +136,7 @@ class ProductFetcher:
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Accept-Language': self.accept_language,
-            'Authorization': 'Bearer ',
+            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
             'Content-Type': 'application/json',
             'Origin': self.main_url,
             'Priority': 'u=1, i',
@@ -153,17 +156,21 @@ class ProductFetcher:
             token_retries (int, optional): Maximum retries for the TokenManager. Defaults to 5.
             save_token (bool, optional): Whether to save the token. Defaults to False.
         """
+        if not self.proxy_manager and not self.use_direct_connection:
+            self.logger.debug("Initializing ProxyManager in IdsFetcher")
+            self.proxy_manager = ProxyManager.from_json_file(self.proxy_dir)
         if not self.token_manager:
-            self.logger.debug("Initializing TokenManager in ProductFetcher")
+            self.logger.debug("Initializing TokenManager in IdsFetcher")
             self.token_manager = TokenManager(
                 url=kwargs.get('url', self.main_url),
                 max_retries=kwargs.get('token_retries', 5),
                 save_token=kwargs.get('save_token', False),
                 save_cookies=False
             )
-        if not self.proxy_manager and not self.use_direct_connection:
-            self.logger.debug("Initializing ProxyManager in ProductFetcher")
-            self.proxy_manager = ProxyManager.from_json_file(self.proxy_dir)
+            self.auth_token = self.token_manager.get_token_instance()
+            if self.auth_token is None:
+                raise FileNotFoundError("Failed to get authorization token.")
+            self.headers['Authorization'] = f'Bearer {self.auth_token}'
 
     def decompress_http_response(self, response_data: bytes, encoding: str) -> bytes:
         """
@@ -358,12 +365,6 @@ class ProductFetcher:
 
         self.initialize_managers()
 
-        if self.auth_token is None:
-            self.auth_token = self.token_manager.get_token_instance()
-            if self.auth_token is None:
-                raise FileNotFoundError("Failed to get authorization token.")
-
-        self.headers["Authorization"] = f'Bearer {self.auth_token}'
         self.headers["User-Agent"] = self.ua.random
 
         data_list: List[Dict[str, Any]] = []
@@ -485,21 +486,33 @@ class ProductFetcher:
                             # save_to_file(json_data, f"response_error_{product_id}", "products")
                             error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                             error_429 = False
+                            error_401 = False
                             for error_message in error_messages:
                                 self.logger.warning(f'Product API Error: {error_message}')
                                 if '429' in error_message:
                                     error_429 = True
+                                if '401' in error_message:
+                                    error_401 = True
 
                             if error_429:
                                 retry_time = int(response.headers.get("Retry-After", 1))
                                 self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
                                 # wait_with_backoff(request_attempts, backoff_factor)
-
                                 proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
                                 conn, current_proxy_ip = make_connection(timeout=retry_time)
-
                                 request_attempts += 1
+                                continue
 
+                            if error_401:
+                                self.logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
+
+                                self.auth_token = self.token_manager.get_token_instance()
+                                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                                request_attempts += 1
+                                if request_attempts > 1:
+                                    conn, current_proxy_ip = make_connection()
+                                else:
+                                    conn, current_proxy_ip = make_connection(put_to_sleep=False)
                                 continue
 
                         data, errors = self.parse_product(json_data)
@@ -544,6 +557,7 @@ class ProductFetcher:
                             conn, current_proxy_ip = make_connection()
                         else:
                             conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                        continue
 
                     elif response.status == 429:  # need to avoid this
                         retry_time = int(response.headers.get("Retry-After", 1))
@@ -585,7 +599,8 @@ class ProductFetcher:
             self.logger.error(f'Error while fetching products: {e}')
             status = 1
         finally:
-            if self.proxy_manager:
+            if self.proxy_manager and self.shut_down_proxy_scheduler:
+                self.logger.debug(f"In {__file__}: Closing proxy_manager scheduler.")
                 self.proxy_manager.shutdown_scheduler()
             if conn is not None:
                 conn.close()
