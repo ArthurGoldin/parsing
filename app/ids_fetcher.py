@@ -74,7 +74,7 @@ class IdsFetcher:
         # Configure logging
         try:
             logging.config.fileConfig(logging_path)
-            self.logger = logging.getLogger('main')
+            self.logger = logging.getLogger('ids_fetcher')
         except Exception as e:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger()
@@ -630,7 +630,7 @@ class IdsFetcher:
         try:
             return self.fetch_product_ids_by_categories(categories, **kwargs)
         except Exception as e:
-            self.logger.error(f"In {__file__}->main: {e}")
+            self.logger.error(f"In {__file__}->run: {e}")
             return []
 
     def load_categories(self, file_name: str = "", ind: int = 0, run_root_categories: bool = True) -> Optional[List[Dict[str, Any]]]:

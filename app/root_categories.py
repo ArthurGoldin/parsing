@@ -26,7 +26,7 @@ config_path = os.path.join(current_dir, 'configs', 'app.conf')
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
-    logger = logging.getLogger('main')
+    logger = logging.getLogger('root_categories')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()

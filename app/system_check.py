@@ -34,7 +34,7 @@ if not os.path.exists(log_file_path):
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
-    logger = logging.getLogger('main')
+    logger = logging.getLogger('system_check')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
@@ -148,7 +148,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
 
         try:
             logger.info('Checking category tree request with GraphQl...')
-            ct = root_categories.get_category_tree(save_data=False)
+            ct = root_categories.get_category_tree(token_manager=token_manager, save_data=False)
             if ct is None:
                 res_stats["root_categories(GraphQL request)"] = "FAILED"
             else:

@@ -1,7 +1,9 @@
+from typing import Tuple
 import os
 import logging
 import logging.config
 import time
+from xmlrpc.client import Boolean
 import root_categories
 import configparser
 import undetected_chromedriver as uc
@@ -12,7 +14,10 @@ from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from save_and_load_data import save_to_file
-# from proxy_manager import ProxyManager
+from proxy_manager import Proxy, ProxyManager
+from pynput.keyboard import Controller, Key
+from threading import Thread
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -21,7 +26,7 @@ config_path = os.path.join(current_dir, 'configs', 'app.conf')
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
-    logger = logging.getLogger('main')
+    logger = logging.getLogger('brands_crawler')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
@@ -32,9 +37,48 @@ config.read(config_path)
 
 data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
 brands_dir = config.get('storage', 'brands_sub_dir')
+proxy_dir = config.get('storage', 'proxy_dir')
 
 
-def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
+def get_proxy(
+        proxy_manager: ProxyManager,
+        proxy: Proxy,
+        request_attempts: int = 0,
+        time_out: float = 1.0,
+        proxy_scheme: str = 'https'
+) -> Tuple[Proxy, bool]:
+    if request_attempts > 0:
+        logger.info(f"Stetting sleep time for reconnection: {2 ** request_attempts} seconds")
+        time.sleep(2 ** request_attempts)
+    if proxy_manager:
+        if proxy is not None:
+            logger.info(f"Setting proxy {proxy.ip}:{proxy.ports.get(proxy_scheme)} to pause")
+            proxy_manager.pause_proxy(proxy.ip, time_out)
+        proxy = proxy_manager.get_available_proxy(timeout=60)  # Adjust timeout as needed
+        logger.debug(f"TokenManager proxy selected: {proxy.ip}:{proxy.ports.get(proxy_scheme)}")
+        use_proxy = True
+    if not proxy:
+        logger.warning("No available proxies to use for the connection.")
+        use_proxy = False
+    return proxy, use_proxy
+
+
+def init_driver(proxy=None, proxy_scheme='https') -> uc.Chrome:
+    chrome_options = uc.ChromeOptions()
+    chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1280,1024')
+
+    if proxy is not None:
+        proxy_url = f"{proxy.ip}:{proxy.ports.get(proxy_scheme)}"
+        chrome_options.add_argument(f'--proxy-server={proxy_url}')
+        logger.info(f"Using proxy: {proxy_url}")
+    return uc.Chrome(options=chrome_options)
+
+
+def fetch_html(proxy_manager: ProxyManager, url: str, max_retries: int = 5) -> Optional[str]:
     """
     Fetch the HTML content from the given URL using Selenium.
 
@@ -45,40 +89,58 @@ def fetch_html(url: str, max_retries: int = 5) -> Optional[str]:
     Returns:
         Optional[str]: The fetched HTML content, or None if fetching fails.
     """
+    def enter_proxy_auth(proxy_username, proxy_password):
+        """
+        Simulates typing credentials into the proxy authentication popup.
+        """
+        time.sleep(1.5)  # Wait for the popup to appear
+
+        keyboard = Controller()
+        keyboard.type(proxy_username)
+        keyboard.press(Key.tab)
+        keyboard.release(Key.tab)
+        time.sleep(0.5)
+        keyboard.type(proxy_password)
+        keyboard.press(Key.enter)
+        keyboard.release(Key.enter)
+
+    def open_page(driver, url):
+        """
+        Opens a webpage with the Selenium driver.
+        """
+        driver.get(url)
+
+    def get_response(driver, use_proxy):
+        if (use_proxy):
+            # driver.get(self.url)
+            Thread(target=open_page, args=(driver, url)).start()
+            Thread(target=enter_proxy_auth, args=(proxy.user, proxy.password)).start()
+        else:
+            driver.get(url)
+
+        try:
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//div[@id='filters']//ul")
+                )
+            )
+        except TimeoutException:
+            logger.warning("XPath not found within the time limit. Proceeding to click buttons.")
 
     html = None
     driver = None
     attempt_count = 0
-    # proxy_manager = ProxyManager.from_json_file('data/proxy/proxy.json')
-
+    proxy = None
     while attempt_count < max_retries:
-        # proxy = proxy_manager.get_available_proxy()["proxy_address"]["https"]
-        # if proxy is not None:
-        #     auth_part, proxy_address = proxy.split("@")
-        #     username, password = auth_part.split(":")
-        #     proxy_host, proxy_port = proxy_address.split(":")
-        #     proxy_port = int(proxy_port)
-        #     credentials = f"{username}:{password}"
-        #     encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-
-        options = uc.ChromeOptions()
-        options.add_argument('--disable-gpu')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        driver = uc.Chrome(options=options)
         try:
-            driver.get(url)
+            proxy, use_proxy = get_proxy(proxy_manager, proxy, attempt_count)
 
-            try:
-                WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, "//div[@id='filters']//ul")
-                    )
-                )
-            except TimeoutException:
-                logger.warning("XPath not found within the time limit. Proceeding to click buttons.")
+            driver = init_driver(proxy)
+
+            get_response(driver, use_proxy)
 
             time.sleep(1)
+
             while True:
                 try:
                     buttons = driver.find_elements(
@@ -150,7 +212,7 @@ def get_brand_labels(html: str) -> List[str]:
     return label_texts
 
 
-def get_brands_by_category(categories: List[int], url: str = "https://uzum.uz/ru/category/") -> Dict[int, List[str]]:
+def get_brands_by_category(proxy_manager: ProxyManager, categories: List[int], url: str = "https://uzum.uz/ru/category/") -> Dict[int, List[str]]:
     """
     Get brands by category from the specified URL.
 
@@ -163,7 +225,7 @@ def get_brands_by_category(categories: List[int], url: str = "https://uzum.uz/ru
     """
     brands_by_category = {}
     for category in categories:
-        html_content = fetch_html(f'{url}{category}')
+        html_content = fetch_html(proxy_manager, f'{url}{category}')
 
         if html_content:
             labels = get_brand_labels(html_content)
@@ -177,7 +239,7 @@ def get_brands_by_category(categories: List[int], url: str = "https://uzum.uz/ru
     return brands_by_category
 
 
-def get_all_main_categories() -> Optional[List[int]]:
+def get_all_main_categories(proxy_manager: ProxyManager) -> Optional[List[int]]:
     """
     Get all main categories from the root categories.
 
@@ -186,7 +248,7 @@ def get_all_main_categories() -> Optional[List[int]]:
     """
     rc = root_categories.load_last_saved_root_categories()
     if not rc:
-        rc = root_categories.get_root_categories()
+        rc = root_categories.get_root_categories(proxy_manager=proxy_manager)
     if rc:
         main_categories = [main_category['id'] for main_category in rc['payload']]
         return main_categories
@@ -194,13 +256,16 @@ def get_all_main_categories() -> Optional[List[int]]:
         return None
 
 
-def run_brands_crawler():
-    main_categories = get_all_main_categories()
+def run_brands_crawler(proxy_manager: Optional[ProxyManager] = None):
+    if proxy_manager is None:
+        proxy_manager = ProxyManager().from_json_file(proxy_dir)
+
+    main_categories = get_all_main_categories(proxy_manager)
     logger.info(f"Beginning brands crawling for total {
                 len(main_categories)} categories.")
     logger.debug(main_categories)
 
-    brands_by_category = get_brands_by_category(main_categories)
+    brands_by_category = get_brands_by_category(proxy_manager, main_categories)
     # brands_by_category = get_brands_by_category([10020])
 
     if brands_by_category:

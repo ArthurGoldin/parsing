@@ -76,7 +76,7 @@ class ProductFetcher:
         # Configure logging
         try:
             logging.config.fileConfig(logging_path)
-            self.logger = logging.getLogger('main')
+            self.logger = logging.getLogger('product_fetcher')
         except Exception as e:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger()
@@ -355,8 +355,10 @@ class ProductFetcher:
             Any additional keyword arguments.
 
         Returns:
-            Tuple[List[Dict[str, Any]], List[int], int]:
-                A tuple containing the list of product details, the list of failed product IDs, and the status code.
+            Tuple[int, int]:
+                A tuple containing the status code (0 success, 1 failure) and the last processed index in the product IDs list
+            x-Tuple[List[Dict[str, Any]], List[int], int]:
+                x- A tuple containing the list of product details, the list of failed product IDs, and the status code.
         """
         start_time = time.time()
 
@@ -626,7 +628,7 @@ class ProductFetcher:
         # return total_data_list, failed_product_ids, status
         return status, ind
 
-    def run(self, p_ids: List[int], ind: int = 0) -> Tuple[List[Dict[str, Any]], List[int], int]:
+    def run(self, p_ids: List[int], ind: int = 0) -> Tuple[int, int]:
         """
         Start the product fetching and parsing process.
 
@@ -635,7 +637,7 @@ class ProductFetcher:
 
         Returns:
             Tuple[List[Dict[str, Any]], List[int], int]:
-                A tuple containing the list of product details, the list of failed product IDs, and the status code.
+                A tuple containing status code and last processed index in the list of products.
         """
         self.logger.info("Starting to fetch and parse products")
         try:
@@ -643,7 +645,7 @@ class ProductFetcher:
             return self.fetch_products(p_ids, ind=ind)
         except Exception as e:
             self.logger.error(f"In {__file__}->main: {e}")
-            # return [], [], 1
+            # return status, ind
             return 1, 0
 
     def load_ids(self, file_name: str = "", ind: int = 0, run_ids_fetcher: bool = True) -> Optional[List[int]]:

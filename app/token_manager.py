@@ -3,6 +3,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from threading import Thread
+from pynput.keyboard import Controller, Key
 import json
 import os
 import pickle
@@ -12,7 +13,6 @@ import time
 import configparser
 from proxy_manager import ProxyManager
 import re
-from pynput.keyboard import Controller, Key
 # import pyautogui
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +22,7 @@ config_path = os.path.join(current_dir, 'configs', 'app.conf')
 # Configure logging
 try:
     logging.config.fileConfig(logging_config_path)
-    logger = logging.getLogger('main')
+    logger = logging.getLogger('token_manager')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
@@ -148,6 +148,22 @@ class TokenManager:
         end = url.find(".", start)
         return url[start:end] if end != -1 else None
 
+    def get_proxy(self, proxy, request_attempts=0, time_out=1.0):
+        if request_attempts > 0:
+            logger.info(f"Stetting sleep time for reconnection: {2 ** request_attempts} seconds")
+            time.sleep(2 ** request_attempts)
+        if self.proxy_manager:
+            if proxy is not None:
+                logger.info(f"Setting proxy {proxy.ip}:{proxy.ports.get(self.proxy_scheme)} to pause")
+                self.proxy_manager.pause_proxy(proxy.ip, time_out)
+            proxy = self.proxy_manager.get_available_proxy(timeout=60)  # Adjust timeout as needed
+            logger.debug(f"TokenManager proxy selected: {proxy.ip}:{proxy.ports.get(self.proxy_scheme)}")
+            self.use_proxy = True
+        if not proxy:
+            logger.warning("No available proxies to use for the connection.")
+            self.use_proxy = False
+        return proxy
+
     def init_driver(self, proxy=None):
         chrome_options = uc.ChromeOptions()
         chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
@@ -176,30 +192,11 @@ class TokenManager:
         Returns:
             str: The authorization token if found, else None.
         """
-        # Select a random active proxy
-        proxy = None
-        if self.proxy_manager:
-            proxy = self.proxy_manager.get_available_proxy(timeout=60)  # Adjust timeout as needed
-            self.use_proxy = True
-        if not proxy:
-            logger.warning("No available proxies to use for the connection.")
-            self.use_proxy = False
-        else:
-            logger.debug(f"TokenManager proxy selected: {proxy.ip}:{proxy.ports.get(self.proxy_scheme)}")
-
-        token = None
-        attempt_count = 0
-        driver = None
-
         def enter_proxy_auth(proxy_username, proxy_password):
             """
             Simulates typing credentials into the proxy authentication popup.
             """
             time.sleep(1.5)  # Wait for the popup to appear
-            # pyautogui.typewrite(proxy_username)
-            # pyautogui.press('tab')
-            # pyautogui.typewrite(proxy_password)
-            # pyautogui.press('enter')
 
             keyboard = Controller()
             keyboard.type(proxy_username)
@@ -216,45 +213,53 @@ class TokenManager:
             """
             driver.get(url)
 
+        def get_response(driver):
+            if (self.use_proxy):
+                # driver.get(self.url)
+                Thread(target=open_page, args=(driver, self.url)).start()
+                Thread(target=enter_proxy_auth, args=(proxy.user, proxy.password)).start()
+            else:
+                driver.get(self.url)
+
+            # Wait until the page is fully loaded
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            WebDriverWait(driver, 20).until(
+                EC.title_contains("Uzum Market"))
+
+            # Wait for performance logs to be available
+            WebDriverWait(driver, 20).until(
+                lambda d: d.execute_script(
+                    "return window.performance.getEntriesByType('resource').length > 0")
+            )
+
+            return driver.get_log("performance")
+
+        proxy = None
+        token = None
+        attempt_count = 0
+        driver = None
+
         while attempt_count <= self.max_retries:
             try:
+                proxy = self.get_proxy(proxy, attempt_count)
+
                 driver = self.init_driver(proxy)
-                if (self.use_proxy):
-                    # driver.get(self.url)
-                    Thread(target=open_page, args=(driver, self.url)).start()
-                    Thread(target=enter_proxy_auth, args=(proxy.user, proxy.password)).start()
-                else:
-                    driver.get(self.url)
 
-                if self.save_cookies:
-                    self.save_cookies_with_path(driver, self.cookies_path)
-
-                # Wait until the page is fully loaded
-                WebDriverWait(driver, 20).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-
-                WebDriverWait(driver, 20).until(
-                    EC.title_contains("Uzum Market"))
-
-                # Wait for performance logs to be available
-                WebDriverWait(driver, 20).until(
-                    lambda d: d.execute_script(
-                        "return window.performance.getEntriesByType('resource').length > 0")
-                )
-
-                logs = driver.get_log("performance")
+                logs = get_response(driver)
 
                 if logs:
+                    if self.save_cookies:
+                        self.save_cookies_with_path(driver, self.cookies_path)
                     if save_logs:
                         with open(f'{data_dir}/network_logs.json', 'w', encoding='utf-8') as json_file:
                             json.dump(logs, json_file, ensure_ascii=False, indent=4)
                             logger.info("Network logs saved to: data/network_logs.json")
 
-                    logger.info(
-                        "Network logs received by chromedriver. Processing...")
-                    token = self.process_browser_logs_to_fetch_authorization(
-                        logs)
+                    logger.info("Network logs received by chromedriver. Processing...")
+                    token = self.process_browser_logs_to_fetch_authorization(logs)
                     if token is not None:
                         if self.save_token:
                             subdomain = self.extract_subdomain(self.url)

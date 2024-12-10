@@ -8,9 +8,9 @@ import logging.config
 import sys
 from typing import List, Any
 
-from app.token_manager import TokenManager
 import root_categories
 import configparser
+from token_manager import TokenManager
 from ids_fetcher import IdsFetcher
 from product_fetcher import ProductFetcher
 from save_and_load_data import load_last_saved_json
@@ -50,7 +50,8 @@ products_dir = config.get('storage', 'products_sub_dir')
 root_categories_dir = config.get('storage', 'root_categories_sub_dir')
 proxy_dir = config.get('storage', 'proxy_dir')
 
-data_dir = os.path.join(current_dir, config.get('storage', 'data_directory'))
+max_prd_fetching_retries = config.getint('main', 'max_prd_fetching_retries')
+
 if not os.path.exists(data_dir):
     os.makedirs(data_dir)
 
@@ -92,10 +93,21 @@ def fetch_data() -> None:
             run_brands_crawler()
 
         logger.info('Parsing products...')
+        product_fetcher_counter = 0
+        ind = 0
         product_fetcher = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
-        products, failed_products_ids, status = product_fetcher.run(p_ids)
+        while (product_fetcher_counter < max_prd_fetching_retries):
+            product_fetcher_counter += 1
+            status, ind = product_fetcher.run(p_ids[ind:])
+            if status == 0:
+                logger.info(f"Successfully fetched {ind} products.")
+                break
+            else:
+                logger.warning(f"Failed to fetch {len(p_ids[ind:])} of {len(p_ids)} products.")
+                if product_fetcher_counter < max_prd_fetching_retries:
+                    logger.info(f"Retrying: attempt no {product_fetcher_counter} of {max_prd_fetching_retries}...")
         # products, failed_products_ids, status = product_parser.fetch_products(p_ids)
-        logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
+        # logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
 
     except Exception as e:
         logger.error(f"Could not fetch data: {e}. Exiting...")
