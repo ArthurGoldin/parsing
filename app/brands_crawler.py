@@ -3,7 +3,6 @@ import os
 import logging
 import logging.config
 import time
-from xmlrpc.client import Boolean
 import root_categories
 import configparser
 import undetected_chromedriver as uc
@@ -15,8 +14,6 @@ from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from save_and_load_data import save_to_file
 from proxy_manager import Proxy, ProxyManager
-from pynput.keyboard import Controller, Key
-from threading import Thread
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +42,7 @@ def get_proxy(
         proxy: Proxy,
         request_attempts: int = 0,
         time_out: float = 1.0,
-        proxy_scheme: str = 'https'
+        proxy_scheme: str = 'http'
 ) -> Tuple[Proxy, bool]:
     if request_attempts > 0:
         logger.info(f"Stetting sleep time for reconnection: {2 ** request_attempts} seconds")
@@ -56,25 +53,42 @@ def get_proxy(
             proxy_manager.pause_proxy(proxy.ip, time_out)
         proxy = proxy_manager.get_available_proxy(timeout=60)  # Adjust timeout as needed
         logger.debug(f"TokenManager proxy selected: {proxy.ip}:{proxy.ports.get(proxy_scheme)}")
-        use_proxy = True
     if not proxy:
         logger.warning("No available proxies to use for the connection.")
-        use_proxy = False
-    return proxy, use_proxy
+    return proxy
 
 
-def init_driver(proxy=None, proxy_scheme='https') -> uc.Chrome:
+def init_driver(proxy: Proxy = None, proxy_manager: ProxyManager = None, proxy_scheme: str = 'http') -> uc.Chrome:
     chrome_options = uc.ChromeOptions()
     chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    # Added for Docker (needed?)
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+
+    # Added while implementing proxy
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--ignore-certificate-errors")
+
+    # chrome_options.add_argument('--remote-debugging-port=9222')  # Use a fixed port
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--window-size=1280,1024')
 
-    if proxy is not None:
-        proxy_url = f"{proxy.ip}:{proxy.ports.get(proxy_scheme)}"
-        chrome_options.add_argument(f'--proxy-server={proxy_url}')
-        logger.info(f"Using proxy: {proxy_url}")
+    if proxy is not None and proxy_manager is not None:
+        logger.info("Adding proxy extension...")
+        ext_path = proxy_manager.create_proxy_auth_extension(proxy)
+        if ext_path:
+            # chrome_options.add_extension(ext_path)
+            try:
+                if ext_path.endswith('proxy_auth_extension.zip'):
+                    ext_path = ext_path.split('proxy_auth_extension.zip')[0]
+                chrome_options.add_argument(f"--load-extension={ext_path}")
+                logger.info(f"Added proxy authentication extension for proxy {proxy.ip}")
+            except Exception as e:
+                logger.error(f"Extension error: {e}")
+            logger.info(f"Using proxy: {proxy.ip}")
+        else:
+            logger.warning(f"Failed to create proxy authentication extension for proxy {proxy.ip}")
+
     return uc.Chrome(options=chrome_options)
 
 
@@ -89,34 +103,9 @@ def fetch_html(proxy_manager: ProxyManager, url: str, max_retries: int = 5) -> O
     Returns:
         Optional[str]: The fetched HTML content, or None if fetching fails.
     """
-    def enter_proxy_auth(proxy_username, proxy_password):
-        """
-        Simulates typing credentials into the proxy authentication popup.
-        """
-        time.sleep(1.5)  # Wait for the popup to appear
 
-        keyboard = Controller()
-        keyboard.type(proxy_username)
-        keyboard.press(Key.tab)
-        keyboard.release(Key.tab)
-        time.sleep(0.5)
-        keyboard.type(proxy_password)
-        keyboard.press(Key.enter)
-        keyboard.release(Key.enter)
-
-    def open_page(driver, url):
-        """
-        Opens a webpage with the Selenium driver.
-        """
+    def get_response(driver):
         driver.get(url)
-
-    def get_response(driver, use_proxy):
-        if (use_proxy):
-            # driver.get(self.url)
-            Thread(target=open_page, args=(driver, url)).start()
-            Thread(target=enter_proxy_auth, args=(proxy.user, proxy.password)).start()
-        else:
-            driver.get(url)
 
         try:
             WebDriverWait(driver, 30).until(
@@ -133,11 +122,11 @@ def fetch_html(proxy_manager: ProxyManager, url: str, max_retries: int = 5) -> O
     proxy = None
     while attempt_count < max_retries:
         try:
-            proxy, use_proxy = get_proxy(proxy_manager, proxy, attempt_count)
+            proxy = get_proxy(proxy_manager, proxy, attempt_count)
 
-            driver = init_driver(proxy)
+            driver = init_driver(proxy, proxy_manager)
 
-            get_response(driver, use_proxy)
+            get_response(driver)
 
             time.sleep(1)
 
@@ -261,8 +250,7 @@ def run_brands_crawler(proxy_manager: Optional[ProxyManager] = None):
         proxy_manager = ProxyManager().from_json_file(proxy_dir)
 
     main_categories = get_all_main_categories(proxy_manager)
-    logger.info(f"Beginning brands crawling for total {
-                len(main_categories)} categories.")
+    logger.info(f"Beginning brands crawling for total {len(main_categories)} categories.")
     logger.debug(main_categories)
 
     brands_by_category = get_brands_by_category(proxy_manager, main_categories)

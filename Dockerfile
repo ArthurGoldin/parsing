@@ -1,18 +1,29 @@
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
 
-# Set environment variable to avoid some issues in headless mode
+# Set environment variable to avoid issues in headless mode
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Install dependencies including curl, wget, unzip, and Xvfb
-RUN apt-get update && apt-get install -y wget gnupg ca-certificates curl unzip xvfb
+# Install dependencies including curl, wget, unzip, Xvfb, and kernel headers
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    ca-certificates \
+    curl \
+    unzip \
+    xvfb \
+    linux-headers-amd64 \
+    build-essential \
+    xdotool \
+    && apt-get clean
 
 # Install Google Chrome
 RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-RUN apt install -y ./google-chrome-stable_current_amd64.deb
+RUN apt install -y ./google-chrome-stable_current_amd64.deb \
+    && rm ./google-chrome-stable_current_amd64.deb
 
 # Install Chromedriver
 RUN wget -q "https://chromedriver.storage.googleapis.com/$(curl -s chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver_linux64.zip" -O /tmp/chromedriver.zip \
@@ -24,7 +35,7 @@ RUN wget -q "https://chromedriver.storage.googleapis.com/$(curl -s chromedriver.
 RUN google-chrome --version || (echo 'Google Chrome was not installed' && exit 1)
 RUN chromedriver --version || (echo 'Chromedriver was not installed' && exit 1)
 
-# Copy the requirements file and install dependencies
+# Copy the requirements file and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

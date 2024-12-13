@@ -2,8 +2,6 @@ import undetected_chromedriver as uc
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from threading import Thread
-from pynput.keyboard import Controller, Key
 import json
 import os
 import pickle
@@ -13,7 +11,6 @@ import time
 import configparser
 from proxy_manager import ProxyManager
 import re
-# import pyautogui
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -43,8 +40,7 @@ class TokenManager:
         self,
         proxy_manager: ProxyManager = None,
         url="https://uzum.uz/ru",
-        use_proxy=True,
-        proxy_scheme='https',
+        proxy_scheme='http',
         max_retries=5,
         save_token=False,
         save_cookies=False,
@@ -57,7 +53,7 @@ class TokenManager:
         self.cookies_path = cookies_path
         self.token = ""
         self.proxy_manager = proxy_manager
-        self.use_proxy = use_proxy
+        self.use_proxy = True if proxy_manager is not None else False
         self.proxy_scheme = proxy_scheme
 
     def __repr__(self):
@@ -83,6 +79,8 @@ class TokenManager:
 
     def save_cookies_with_path(self, driver, path):
         """Save cookies to a specified path."""
+        if not os.path.exists(f"{data_dir}/cookies"):
+            os.makedirs(f"{data_dir}/cookies")
         try:
             with open(path, 'wb') as file:
                 pickle.dump(driver.get_cookies(), file)
@@ -150,7 +148,7 @@ class TokenManager:
 
     def get_proxy(self, proxy, request_attempts=0, time_out=1.0):
         if request_attempts > 0:
-            logger.info(f"Stetting sleep time for reconnection: {2 ** request_attempts} seconds")
+            logger.info(f"Setting sleep time for reconnection: {2 ** request_attempts} seconds")
             time.sleep(2 ** request_attempts)
         if self.proxy_manager:
             if proxy is not None:
@@ -172,17 +170,29 @@ class TokenManager:
         chrome_options.add_argument("--disable-dev-shm-usage")
 
         # Added while implementing proxy
-        # chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        # chrome_options.add_argument("--ignore-certificate-errors")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--ignore-certificate-errors")
 
         # chrome_options.add_argument('--remote-debugging-port=9222')  # Use a fixed port
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1280,1024')
 
         if proxy is not None:
-            proxy_url = f"{proxy.ip}:{proxy.ports.get(self.proxy_scheme)}"
-            chrome_options.add_argument(f'--proxy-server={proxy_url}')
-            logger.info(f"Using proxy: {proxy_url}")
+            logger.info("Adding proxy extension...")
+            ext_path = self.proxy_manager.create_proxy_auth_extension(proxy)
+            if ext_path:
+                # chrome_options.add_extension(ext_path)
+                try:
+                    if ext_path.endswith('proxy_auth_extension.zip'):
+                        ext_path = ext_path.split('proxy_auth_extension.zip')[0]
+                    chrome_options.add_argument(f"--load-extension={ext_path}")
+                    logger.info(f"Added proxy authentication extension for proxy {proxy.ip}")
+                except Exception as e:
+                    logger.error(f"Extension error: {e}")
+                logger.info(f"Using proxy: {proxy.ip}")
+            else:
+                logger.warning(f"Failed to create proxy authentication extension for proxy {proxy.ip}")
+
         return uc.Chrome(options=chrome_options)
 
     def get_token_instance(self, save_logs: bool = False) -> str:
@@ -192,34 +202,10 @@ class TokenManager:
         Returns:
             str: The authorization token if found, else None.
         """
-        def enter_proxy_auth(proxy_username, proxy_password):
-            """
-            Simulates typing credentials into the proxy authentication popup.
-            """
-            time.sleep(1.5)  # Wait for the popup to appear
-
-            keyboard = Controller()
-            keyboard.type(proxy_username)
-            keyboard.press(Key.tab)
-            keyboard.release(Key.tab)
-            time.sleep(0.5)
-            keyboard.type(proxy_password)
-            keyboard.press(Key.enter)
-            keyboard.release(Key.enter)
-
-        def open_page(driver, url):
-            """
-            Opens a webpage with the Selenium driver.
-            """
-            driver.get(url)
 
         def get_response(driver):
-            if (self.use_proxy):
-                # driver.get(self.url)
-                Thread(target=open_page, args=(driver, self.url)).start()
-                Thread(target=enter_proxy_auth, args=(proxy.user, proxy.password)).start()
-            else:
-                driver.get(self.url)
+
+            driver.get(self.url)
 
             # Wait until the page is fully loaded
             WebDriverWait(driver, 20).until(
@@ -244,19 +230,19 @@ class TokenManager:
 
         while attempt_count <= self.max_retries:
             try:
+                # self.url = "https://httpbin.org/ip"
                 proxy = self.get_proxy(proxy, attempt_count)
-
                 driver = self.init_driver(proxy)
-
                 logs = get_response(driver)
-
+                # print(driver.page_source)
+                # break
                 if logs:
                     if self.save_cookies:
-                        self.save_cookies_with_path(driver, self.cookies_path)
+                        self.save_cookies_with_path(driver, f"{data_dir}/{self.cookies_path}")
                     if save_logs:
                         with open(f'{data_dir}/network_logs.json', 'w', encoding='utf-8') as json_file:
                             json.dump(logs, json_file, ensure_ascii=False, indent=4)
-                            logger.info("Network logs saved to: data/network_logs.json")
+                            logger.info(f"Network logs saved to: {data_dir}/network_logs.json")
 
                     logger.info("Network logs received by chromedriver. Processing...")
                     token = self.process_browser_logs_to_fetch_authorization(logs)
@@ -277,7 +263,6 @@ class TokenManager:
                 else:
                     logger.warning(f"Logs were not captured in attempt number: {attempt_count}")
                 attempt_count += 1
-                time.sleep(attempt_count)
             except Exception as e:
                 logger.error(f"Error in get_token_instance: {e}")
             finally:
@@ -286,8 +271,8 @@ class TokenManager:
                         driver.quit()
                     except Exception as e:
                         logger.error(f"Error during driver quit in get_token_instance: {e}")
-                if token is None:
-                    logger.info(f"Couldn't retrieve an authorization token after {self.max_retries + 1} attempts.")
+        if token is None:
+            logger.info(f"Couldn't retrieve an authorization token after {self.max_retries} attempts.")
         self.token = token
         return token
 
@@ -299,7 +284,7 @@ class TokenManager:
 if __name__ == "__main__":
     pm = ProxyManager.from_json_file(proxy_dir)
     token_manager = TokenManager(proxy_manager=pm, save_token=True)
-    token = token_manager.get_token_instance(save_logs=True)
+    token = token_manager.get_token_instance()
     if token is not None:
         logger.info(f"Token received: {token[0:5]}...{token[-5:-1]}")
     else:

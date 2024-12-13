@@ -21,6 +21,9 @@
     "root_categories_req_url": "https://api.uzum.uz/api/main/root-categories?eco=false",
     "product_api_url": "https://api.uzum.uz/api/v2/product/"
   },
+  "main": {
+    "max_prd_fetching_retries": 5
+  },
   "ids_fetching": {
     "use_direct_connection": false,
     "cumulative_save": false,
