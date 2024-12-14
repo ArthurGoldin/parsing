@@ -114,6 +114,7 @@ def initialize_managers(proxy_manager: ProxyManager = None, token_manager: Token
     if not token_manager:
         logger.debug("Initializing TokenManager in root_categories")
         token_manager = TokenManager(
+            proxy_manager=proxy_manager,
             url=main_url,
             max_retries=kwargs.get('token_retries', 5),
             save_token=kwargs.get('save_token', False),
