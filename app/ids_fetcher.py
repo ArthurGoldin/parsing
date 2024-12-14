@@ -201,6 +201,7 @@ class IdsFetcher:
         if not self.token_manager:
             self.logger.debug("Initializing TokenManager in IdsFetcher")
             self.token_manager = TokenManager(
+                proxy_manager=self.proxy_manager,
                 url=kwargs.get('url', self.main_url),
                 max_retries=kwargs.get('token_retries', 5),
                 save_token=kwargs.get('save_token', False),

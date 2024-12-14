@@ -162,6 +162,7 @@ class ProductFetcher:
         if not self.token_manager:
             self.logger.debug("Initializing TokenManager in IdsFetcher")
             self.token_manager = TokenManager(
+                proxy_manager=self.proxy_manager,
                 url=kwargs.get('url', self.main_url),
                 max_retries=kwargs.get('token_retries', 5),
                 save_token=kwargs.get('save_token', False),
@@ -227,7 +228,10 @@ class ProductFetcher:
             parent = category['parent']
             return {
                 'id': parent.get('id'),
-                'title': parent.get('title'),
+                'title': {
+                    'ru': parent.get('title') if self.accept_language.split('-')[0] == 'ru' else "",
+                    'uz': parent.get('title') if self.accept_language.split('-')[0] == 'uz' else "",
+                },
                 'productAmount': parent.get('productAmount'),
                 'parent': get_hierarchical_parents(parent)
             }
@@ -281,12 +285,17 @@ class ProductFetcher:
 
             result: Dict[str, Any] = {
                 'id': payload.get('id'),
-                'title': payload.get('title'),
-                'titleUz': payload.get('localizableTitle', {}).get('uz'),
+                'title': {
+                    'ru': payload.get('localizableTitle', {}).get('ru'),
+                    'uz': payload.get('localizableTitle', {}).get('uz')
+                },
                 'brand': ', '.join(brand),
                 'category': {
                     'id': payload.get('category', {}).get('id'),
-                    'title': payload.get('category', {}).get('title'),
+                    'title': {
+                        'ru': payload.get('category', {}).get('title') if self.accept_language.split('-')[0] == 'ru' else "",
+                        'uz': payload.get('category', {}).get('title') if self.accept_language.split('-')[0] == 'uz' else "",
+                    },
                     'productAmount': payload.get('category', {}).get('productAmount'),
                     'parent': hierarchical_parents
                 },
@@ -300,7 +309,10 @@ class ProductFetcher:
                 'skuList': [{
                     'characteristics': [{
                         'id': characteristic_data[char.get('charIndex')]['id'],
-                        'title': characteristic_data[char.get('charIndex')]['title'],
+                        'title': {
+                            'ru': characteristic_data[char.get('charIndex')]['title'] if self.accept_language.split('-')[0] == 'ru' else "",
+                            'uz': characteristic_data[char.get('charIndex')]['title'] if self.accept_language.split('-')[0] == 'uz' else "",
+                        },
                         'values': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]
                     } for char in sku.get('characteristics', [])],
                     'id': sku.get('id'),
