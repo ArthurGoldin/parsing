@@ -258,6 +258,9 @@ class ProductFetcher:
 
             payload = json_data.get('payload', {}).get('data', {})
 
+            if not payload:
+                raise ValueError("Payload or data is missing in the JSON file.")
+
             # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
             # image_path = "N/A"
 
@@ -286,9 +289,6 @@ class ProductFetcher:
             characteristic_data = payload.get('characteristics', [])
 
             hierarchical_parents = get_hierarchical_parents(payload.get('category', {}))
-
-            if not payload:
-                raise ValueError("Payload or data is missing in the JSON file.")
 
             if payload.get('category', {}).get('title', '').lower() == "Смартфоны Apple iPhone(iOS)".lower():
                 brand = ["Apple"]
