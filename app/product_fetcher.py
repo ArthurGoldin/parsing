@@ -15,11 +15,11 @@ import uuid
 import os
 from datetime import datetime
 from save_and_load_data import load_last_saved_json, save_to_file
-from image_download import upload_image_from_url
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
 from token_manager import TokenManager
 from ids_fetcher import IdsFetcher
+# from image_download import upload_image_from_url
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -196,7 +196,7 @@ class ProductFetcher:
         else:
             return response_data
 
-    def parse_product(self, json_data: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str] | str]]:
+    def parse_product(self, json_data: Dict[str, Any], send_img_to_broker) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str] | str]]:
         """
         Parse product information from the given JSON data.
 
@@ -257,6 +257,32 @@ class ProductFetcher:
                 raise AttributeError("product not found")
 
             payload = json_data.get('payload', {}).get('data', {})
+
+            # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
+            # image_path = "N/A"
+
+            img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
+            if send_img_to_broker:
+                obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+                img_data = {
+                    "url": img_url,
+                    "image_category": 'product',
+                    "object_key": obj_key
+                }
+                try:
+                    send_message(img_data, host=self.broker_host, port=self.broker_port, queue_name="products_images")
+                except Exception as e:
+                    self.logger.error(f"Failed to send image data to broker 'products_images': {e}")
+
+            # if img_url:
+            #     try:
+            #         obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+            #         res = upload_image_from_url(image_url=img_url, object_key=obj_key)
+            #         if res:
+            #             image_path = res["url"] if res["url"] is not None else "N/A"
+            #     except Exception as e:
+            #         self.logger.error(f"Failed to upload an image: {e}")
+
             characteristic_data = payload.get('characteristics', [])
 
             hierarchical_parents = get_hierarchical_parents(payload.get('category', {}))
@@ -270,18 +296,6 @@ class ProductFetcher:
                 oldest_ancestor_id = find_oldest_ancestor(payload)
                 brand_keywords = self.brands_by_category.get(str(oldest_ancestor_id), []) if self.brands_by_category else []
                 brand = find_keywords_in_title(payload.get('title'), brand_keywords) if brand_keywords else []
-
-            # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
-            image_path = "N/A"
-            img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
-            if img_url:
-                try:
-                    obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
-                    res = upload_image_from_url(image_url=img_url, object_key=obj_key)
-                    if res:
-                        image_path = res["url"] if res["url"] is not None else "N/A"
-                except Exception as e:
-                    self.logger.error(f"Failed to upload an image: {e}")
 
             result: Dict[str, Any] = {
                 'id': payload.get('id'),
@@ -304,8 +318,8 @@ class ProductFetcher:
                 'ordersAmount': payload.get('ordersAmount'),
                 'totalAvailableAmount': payload.get('totalAvailableAmount'),
                 'url': f'{self.main_url}/product/{payload.get("id")}',
-                'photo': image_path,
-                # 'photo': payload.get('photos', [{}])[0].get('photo', {}).get('800', {}).get('high'),
+                # 'photo': image_path,
+                'photo': img_url,
                 'skuList': [{
                     'characteristics': [{
                         'id': characteristic_data[char.get('charIndex')]['id'],
@@ -313,7 +327,14 @@ class ProductFetcher:
                             'ru': characteristic_data[char.get('charIndex')]['title'] if self.accept_language.split('-')[0] == 'ru' else "",
                             'uz': characteristic_data[char.get('charIndex')]['title'] if self.accept_language.split('-')[0] == 'uz' else "",
                         },
-                        'values': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]
+                        'values': {
+                            'id': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]['id'],
+                            'title': {
+                                'ru': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]['title'] if self.accept_language.split('-')[0] == 'ru' else "",
+                                'uz': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]['title'] if self.accept_language.split('-')[0] == 'uz' else ""
+                            },
+                            'value': characteristic_data[char.get('charIndex')]['values'][char.get('valueIndex')]['value']
+                        },
                     } for char in sku.get('characteristics', [])],
                     'id': sku.get('id'),
                     'availableAmount': sku.get('availableAmount'),
@@ -529,7 +550,7 @@ class ProductFetcher:
                                     conn, current_proxy_ip = make_connection(put_to_sleep=False)
                                 continue
 
-                        data, errors = self.parse_product(json_data)
+                        data, errors = self.parse_product(json_data, send_to_db)
                         if data:
                             data_list.append(data)
                             total_products_count += 1
@@ -674,6 +695,7 @@ class ProductFetcher:
         product_list = load_last_saved_json(directory=f'{self.data_dir}/{self.product_ids_dir}', file_name=file_name)
         if product_list:
             # return product_list[ind:]
+            self.logger.info(f"Loaded {len(product_list)} product IDs for fetching.")
             return product_list
         elif run_ids_fetcher:
             self.logger.info("IDs not found in local storage. Running IdsFetcher.")
