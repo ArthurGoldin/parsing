@@ -5,20 +5,20 @@ import logging
 import logging.config
 import zlib
 import brotli
-from fake_useragent import UserAgent
-from typing import List, Tuple, Dict, Any, Optional
 import sys
 import re
 import argparse
 import configparser
 import uuid
 import os
+from fake_useragent import UserAgent
 from datetime import datetime
 from save_and_load_data import load_last_saved_json, save_to_file
 from send_data_to_db import send_message
 from proxy_manager import ProxyManager
 from token_manager import TokenManager
 from ids_fetcher import IdsFetcher
+from typing import List, Tuple, Dict, Any, Optional
 # from image_download import upload_image_from_url
 
 
@@ -264,19 +264,6 @@ class ProductFetcher:
             # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
             # image_path = "N/A"
 
-            img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
-            if send_img_to_broker:
-                obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
-                img_data = {
-                    "url": img_url,
-                    "image_category": 'product',
-                    "object_key": obj_key
-                }
-                try:
-                    send_message(img_data, host=self.broker_host, port=self.broker_port, queue_name="products_images")
-                except Exception as e:
-                    self.logger.error(f"Failed to send image data to broker 'products_images': {e}")
-
             # if img_url:
             #     try:
             #         obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
@@ -285,6 +272,22 @@ class ProductFetcher:
             #             image_path = res["url"] if res["url"] is not None else "N/A"
             #     except Exception as e:
             #         self.logger.error(f"Failed to upload an image: {e}")
+
+            if len(payload.get('photos', {})) > 0:
+                img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
+                if send_img_to_broker:
+                    obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+                    img_data = {
+                        "url": img_url,
+                        "image_category": 'product',
+                        "object_key": obj_key
+                    }
+                    try:
+                        send_message(img_data, host=self.broker_host, port=self.broker_port, queue_name="products_images")
+                    except Exception as e:
+                        self.logger.error(f"Failed to send image data to broker 'products_images': {e}")
+            else:
+                img_url = ""
 
             characteristic_data = payload.get('characteristics', [])
 
@@ -564,15 +567,16 @@ class ProductFetcher:
                         proxy_ind += 1
                         ind += 1
 
-                        if ind % self.batch_size == 0:
+                        if product_count % self.batch_size == 0:
                             self.logger.debug(f"Processed {ind} products.")
+                            self.logger.debug(f"Fetched {product_count} products.")
                         if len(data_list) % self.package_size == 0:
                             if data_list and save_data:
                                 save_data_to(data_list)
                             if send_to_db:
                                 data_to_send = {
                                     'platform': 'UZUM',
-                                    'data': [data_list]
+                                    'data': [data_list] if len(data_list) == 1 else data_list
                                 }
                                 # Optionally, send data to DB or other services
                                 try:
@@ -641,8 +645,18 @@ class ProductFetcher:
                 conn.close()
 
         if data_list:
-            self.logger.info(f'Finished parsing {ind} products.')
-            self.logger.info(f'Total products parsed for {datetime.now().strftime("%d/%m/%Y")}: {total_products_count}')
+            self.logger.info(f'Finished processing {ind} products.')
+            self.logger.info(f'Total products processed for {datetime.now().strftime("%d/%m/%Y")}: {total_products_count}')
+            if send_to_db:
+                data_to_send = {
+                    'platform': 'UZUM',
+                    'data': [data_list] if len(data_list) == 1 else data_list
+                }
+                # Optionally, send data to DB or other services
+                try:
+                    send_message(data_to_send, host=self.broker_host, port=self.broker_port)
+                except Exception as e:
+                    self.logger.error(f"Failed to send to Broker: {e}")
             if save_data:
                 file_name = None
                 if len(data_list) == 1 and ind <= 1:
@@ -654,6 +668,9 @@ class ProductFetcher:
             self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
             if save_data:
                 save_data_to(failed_product_ids, 'failed_product_ids')
+        if ind < len(p_ids):
+            self.logger.warning(f'Total products processed for current try is {ind} out of {len(p_ids)}')
+            status = 2
 
         end_time = time.time()
         self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")
@@ -661,7 +678,7 @@ class ProductFetcher:
         # return total_data_list, failed_product_ids, status
         return status, ind
 
-    def run(self, p_ids: List[int], ind: int = 0) -> Tuple[int, int]:
+    def run(self, p_ids: List[int], ind: int = 0, save_data: bool = False, send_data=True) -> Tuple[int, int]:
         """
         Start the product fetching and parsing process.
 
@@ -675,7 +692,7 @@ class ProductFetcher:
         self.logger.info("Starting to fetch and parse products")
         try:
             self.logger.info(f"Starting to fetch products from index {ind}.")
-            return self.fetch_products(p_ids, ind=ind)
+            return self.fetch_products(p_ids, ind=ind, save_data=save_data, send_to_db=send_data)
         except Exception as e:
             self.logger.error(f"In {__file__}->main: {e}")
             # return status, ind
@@ -711,17 +728,36 @@ class ProductFetcher:
         self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher'")
         return None
 
+    def get_ids_from_category(self, category_id: int) -> List[int]:
+        """
+        Fetch product IDs from the given category ID.
+
+        Args:
+            category_id (int): The
+        """
+        try:
+            self.logger.info(f"Initiating IdsFetcher to fetch product IDs from category {category_id}")
+            ids_fetcher = IdsFetcher(proxy_manager=self.proxy_manager, token_manager=self.token_manager)
+            return ids_fetcher.fetch_product_ids_by_categories(category_id, save_data=False)
+        except Exception as e:
+            self.logger.error(f"While fetching product IDs from category {category_id}: {e}")
+            return []
+
 
 if __name__ == "__main__":
-    product_fetcher = ProductFetcher()
-
     parser = argparse.ArgumentParser(description='Processing of product data.')
     parser.add_argument('product_ids', metavar='N', type=int, nargs='*',
                         help='An integer for the product ID to process or the path to the product IDs directory.')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
                         const='product_ids', help='Load the last saved product IDs. Specify a file name to load from data/product_ids.')
+    parser.add_argument('-c', '--categories', metavar='CATEGORY', type=int, nargs='?', help='Category(s) ID(s) to fetch product IDs from.')
+    parser.add_argument('-s', '--save', action='store_true', help='Save data to local storage.')
+    parser.add_argument('-d', '--disableBroker', action='store_false', help='Define whether to send data to broker.')
     parser.add_argument('-i', '--index', metavar='START_INDEX', type=int, nargs='?',
                         const=0, help='Index in the categories list to start fetching from.')
+
+    product_fetcher = ProductFetcher()
+    product_fetcher.initialize_managers()
 
     args = parser.parse_args()
     product_list: List[int] = []
@@ -735,6 +771,9 @@ if __name__ == "__main__":
         # loaded_ids = product_fetcher.load_ids(file_name, args.index if args.index else 0)
         if loaded_ids:
             product_list = loaded_ids
+    elif args.categories:
+        product_fetcher.logger.info(f"Fetching product IDs from category(s) {args.categories}")
+        product_list = product_fetcher.get_ids_from_category(args.categories)
     elif args.product_ids:
         product_fetcher.logger.info(f'Parsing product with ID(s): {args.product_ids}')
         product_list = args.product_ids
@@ -742,11 +781,20 @@ if __name__ == "__main__":
         product_fetcher.logger.error("No product IDs provided!")
         product_fetcher.logger.info("Try using -l or --load to load most recent IDs. Or provide product ID(s) to parse specific product(s).")
 
+    if args.save:
+        product_fetcher.logger.info(f"Data will be stored to {product_fetcher.data_dir}/{product_fetcher.products_dir}.")
+    else:
+        product_fetcher.logger.info("Data storage is disabled.")
+    if args.disableBroker:
+        product_fetcher.logger.info(f"Sending data to broker is enabled")
+    else:
+        product_fetcher.logger.info("Sending data to broker is disabled.")
+
     if product_list:
         product_fetcher.logger.info(f"Starting to parse products from the input. Data language: {product_fetcher.accept_language.split("-")[1]}")
         try:
             # fetched_data, failed_ids, status = product_fetcher.run(product_list)
-            status, ind = product_fetcher.run(product_list, args.index if args.index else 0)
+            status, ind = product_fetcher.run(product_list, args.index if args.index else 0, save_data=args.save, send_data=args.disableBroker)
             # Optionally, handle fetched_data and failed_ids as needed
         except Exception as e:
             product_fetcher.logger.error(f"In {sys.argv[0]}->main: {e}")

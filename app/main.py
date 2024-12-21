@@ -98,14 +98,16 @@ def fetch_data() -> None:
         product_fetcher = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
         while (product_fetcher_counter < max_prd_fetching_retries):
             product_fetcher_counter += 1
-            status, ind = product_fetcher.run(p_ids[ind:])
+            status, ind = product_fetcher.run(p_ids, ind=ind)
+
             if status == 0:
                 logger.info(f"Successfully fetched {ind} products.")
                 break
             else:
+                logger.warning(f"Failed tp finish fetching all products. Return status: {status}")
                 logger.warning(f"Failed to fetch {len(p_ids[ind:])} of {len(p_ids)} products.")
                 if product_fetcher_counter < max_prd_fetching_retries:
-                    logger.info(f"Retrying: attempt no {product_fetcher_counter} of {max_prd_fetching_retries}...")
+                    logger.info(f"Retrying: attempt number {product_fetcher_counter} of {max_prd_fetching_retries}...")
         # products, failed_products_ids, status = product_parser.fetch_products(p_ids)
         # logger.info(f"Products fetched and parsed: {len(products)}; failed IDs count: {len(failed_products_ids)}")
 

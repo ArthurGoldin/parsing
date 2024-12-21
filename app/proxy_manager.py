@@ -796,6 +796,7 @@ class ProxyManager:
             # Wait using the condition variable
             with self.proxy_available:
                 if remaining_time is not None:
+                    logger.info(f"Waiting for {remaining_time} seconds for an active proxy...")
                     self.proxy_available.wait(timeout=remaining_time)
                 else:
                     self.proxy_available.wait()

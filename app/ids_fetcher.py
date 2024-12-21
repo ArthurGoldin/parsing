@@ -536,7 +536,7 @@ class IdsFetcher:
         return data_list, status
 
     def fetch_product_ids_by_categories(self,
-                                        categories: List[Dict[str, Any]],
+                                        categories: Any,
                                         save_data: bool = True,
                                         load_most_recent_if_failed: bool = False,
                                         sort_result: bool = False,
@@ -557,6 +557,18 @@ class IdsFetcher:
             List[int]: List of fetched product IDs.
         """
         start_time = time.time()
+
+        def check_input(categories: Any) -> List[Dict[str, Any]]:
+            if isinstance(categories, int):
+                self.logger.debug("Converting single category ID to list of dictionaries for processing.")
+                categories = [{'id': categories, 'productAmount': 0}]
+            elif isinstance(categories, list):
+                if isinstance(categories[0], int):
+                    self.logger.debug("Converting a list of categories ID to list of dictionaries for processing.")
+                    categories = [{'id': cid, 'productAmount': 0} for cid in categories]
+            return categories
+
+        categories = check_input(categories)
 
         self.initialize_managers(**kwargs)
 
@@ -612,9 +624,11 @@ class IdsFetcher:
 
         end_time = time.time()
         self.logger.info(f"Product ID's fetching execution time: {end_time - start_time:.2f} seconds")
+        if len(p_ids) == 0:
+            return None
         return p_ids
 
-    def run(self, categories: List[Dict[str, Any]], **kwargs: Any) -> List[int]:
+    def run(self, categories: Any, **kwargs: Any) -> List[int]:
         """
         Start the product ID fetching process for the given categories.
 
@@ -670,16 +684,16 @@ if __name__ == "__main__":
                         help='Save fetched product IDs to file.')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
                         const="", help='Load most recent categories locally stored.')
-    parser.add_argument('-o', '--sort', action='store_true',
-                        help='Sort the resulting product IDs.')
+    parser.add_argument('-o', '--sort', action='store_true', help='Sort the resulting product IDs.')
     parser.add_argument('-i', '--index', metavar='START_INDEX', type=int, nargs='?',
                         const=0, help='Index in the categories list to start fetching from.')
     args = parser.parse_args()
 
-    categories: Optional[List[Dict[str, Any]]] = None
+    categories = None
     if args.categories:
         id_fetcher.logger.info("Received categories from user input.")
-        categories = [{'id': cid, 'productAmount': 0} for cid in args.categories]
+        # categories = [{'id': cid, 'productAmount': 0} for cid in args.categories]
+        categories = args.categories
     elif args.load is not None:
         file_name = args.load
         if file_name:

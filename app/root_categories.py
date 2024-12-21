@@ -133,7 +133,7 @@ def get_category_tree(
         backoff_factor: int = 1,
         graphql_req_url: str = "https://graphql.uzum.uz/",
         main_url: str = "https://uzum.uz/",
-        use_direct_connection: bool = True,
+        use_direct_connection: bool = False,
         load_most_recent_if_failed: bool = True,
         save_data: bool = True,
         **kwargs) -> Dict[str, Any]:
@@ -461,7 +461,7 @@ def get_root_categories(
         root_categories_req_url: str = "https://api.uzum.uz/api/main/root-categories?eco=false",
         main_url: str = "https://uzum.uz/",
         accept_lang: List[str] = ['ru-RU', 'uz-UZ'],
-        use_direct_connection: bool = True,
+        use_direct_connection: bool = False,
         load_most_recent_if_failed: bool = True,
         send_to_broker: bool = False,
         save_data: bool = True

@@ -173,7 +173,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
         try:
             logger.info('Checking product_ids...')
             product_ids = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
-            p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else [10], save_data=False)  # change to other default category ID if necessary
+            p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else 10, save_data=False)  # change to other default category ID if necessary
             if p_ids is None:
                 res_stats["product_ids"] = "FAILED"
             else:

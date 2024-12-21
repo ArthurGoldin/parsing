@@ -12,3 +12,6 @@ app/logs
 
 app/proxy
 app/proxy/proxy_list.json
+
+app/to_upload
+app/loaded

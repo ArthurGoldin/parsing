@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     linux-headers-amd64 \
     build-essential \
-    xdotool \
     && apt-get clean
 
 # Install Google Chrome
@@ -38,6 +37,7 @@ RUN chromedriver --version || (echo 'Chromedriver was not installed' && exit 1)
 # Copy the requirements file and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install --upgrade pip setuptools wheel
 
 # Copy the rest of the application code
 COPY app/ /app
