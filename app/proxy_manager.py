@@ -521,6 +521,7 @@ class ProxyManager:
         status_str = proxy_dict["status"].upper()
         if status_str not in ProxyStatus.__members__:
             logger.warning(f"Validation Warning: Unknown status '{status_str}' in proxy data: {dict_filtered}. Setting to UNDEFINED.")
+            proxy_dict["status"] = ProxyStatus.UNDEFINED.value
             # The ProxyStatus Enum will handle this by setting it to UNDEFINED
 
         # All validations passed
@@ -773,8 +774,9 @@ class ProxyManager:
             sleeping_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.SLEEPING]
 
             if not sleeping_proxies:
-                logger.warning("No active or sleeping proxies available.")
-                raise ProxyUnavailableError("No active or sleeping proxies available.")
+                self.check_expired_proxies()
+                logger.warning("No active or sleeping proxies available raising an error.")
+                raise ProxyUnavailableError()
 
             # Calculate remaining time if timeout is set
             if timeout is not None:

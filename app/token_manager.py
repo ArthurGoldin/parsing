@@ -9,7 +9,7 @@ import logging
 import logging.config
 import time
 import configparser
-from proxy_manager import ProxyManager
+from proxy_manager import ProxyManager, ProxyUnavailableError
 import re
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -146,10 +146,10 @@ class TokenManager:
         end = url.find(".", start)
         return url[start:end] if end != -1 else None
 
-    def get_proxy(self, proxy, request_attempts=0, time_out=1.0):
-        if request_attempts > 0:
-            logger.info(f"Setting sleep time for reconnection: {2 ** request_attempts} seconds")
-            time.sleep(2 ** request_attempts)
+    def get_proxy(self, proxy, request_attempts=1, time_out=1.0):
+        if request_attempts > 1:
+            logger.info(f"Setting sleep time for reconnection: {2 ** (request_attempts - 1)} seconds")
+            time.sleep(2 ** (request_attempts - 1))
         if self.proxy_manager:
             if proxy is not None:
                 logger.info(f"Setting proxy {proxy.ip}:{proxy.ports.get(self.proxy_scheme)} to pause")
@@ -231,6 +231,7 @@ class TokenManager:
         while attempt_count <= self.max_retries:
             try:
                 # self.url = "https://httpbin.org/ip"
+                attempt_count += 1
                 proxy = self.get_proxy(proxy, attempt_count)
                 driver = self.init_driver(proxy)
                 logs = get_response(driver)
@@ -262,9 +263,11 @@ class TokenManager:
                         logger.info("No authorization token received. Retrying...")
                 else:
                     logger.warning(f"Logs were not captured in attempt number: {attempt_count}")
-                attempt_count += 1
+            except ProxyUnavailableError as e:
+                logger.error(f"Proxy is unavailable: {e}")
+                break
             except Exception as e:
-                logger.error(f"Error in get_token_instance: {e}")
+                logger.error(f"Failed during Authorization token request: {e}")
             finally:
                 if driver is not None:
                     try:
@@ -272,7 +275,7 @@ class TokenManager:
                     except Exception as e:
                         logger.error(f"Error during driver quit in get_token_instance: {e}")
         if token is None:
-            logger.info(f"Couldn't retrieve an authorization token after {self.max_retries} attempts.")
+            logger.info(f"Couldn't retrieve an authorization token after {attempt_count} attempts.")
         self.token = token
         return token
 

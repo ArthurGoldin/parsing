@@ -750,7 +750,7 @@ if __name__ == "__main__":
                         help='An integer for the product ID to process or the path to the product IDs directory.')
     parser.add_argument('-l', '--load', metavar='FILENAME', type=str, nargs='?',
                         const='product_ids', help='Load the last saved product IDs. Specify a file name to load from data/product_ids.')
-    parser.add_argument('-c', '--categories', metavar='CATEGORY', type=int, nargs='?', help='Category(s) ID(s) to fetch product IDs from.')
+    parser.add_argument('-c', '--categories', metavar='CATEGORY', type=int, nargs='*', help='Category(s) ID(s) to fetch product IDs from.')
     parser.add_argument('-s', '--save', action='store_true', help='Save data to local storage.')
     parser.add_argument('-d', '--disableBroker', action='store_false', help='Define whether to send data to broker.')
     parser.add_argument('-i', '--index', metavar='START_INDEX', type=int, nargs='?',
