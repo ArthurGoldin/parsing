@@ -166,7 +166,7 @@
                 "status": "ACTIVE"
             },
             {
-                "ip": "195.64.112.78",
+                "ip": "45.15.75.78",
                 "ports": {
                     "http": 7861,
                     "https": 7861
@@ -174,8 +174,8 @@
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@195.64.112.78:7861",
-                    "https": "user210707:6qml5v@195.64.112.78:7861"
+                    "http": "user210707:6qml5v@45.15.75.78:7861",
+                    "https": "user210707:6qml5v@45.15.75.78:7861"
                 },
                 "exp": 1737542580,
                 "status": "ACTIVE"

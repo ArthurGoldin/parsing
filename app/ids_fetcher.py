@@ -109,15 +109,12 @@ class IdsFetcher:
         self.conn = None
         self.current_proxy_ip = None
         self.request_counter = 0  # Total number of requests
-        self.proxy_ind = 0
-        self.request_attempts = 0
-        self.current_pm_timeout = self.proxy_manager_timeout
 
         # Managers
         self.proxy_manager: Optional[ProxyManager] = proxy_manager
         self.shut_down_proxy_scheduler = False if proxy_manager is not None else True
         self.token_manager: Optional[TokenManager] = token_manager
-        self.auth_token: Optional[str] = self.token_manager.token if token_manager is not None else None
+        self.auth_token: Optional[str] = self.token_manager.get_token_instance() if token_manager is not None else None
 
         self.ua = UserAgent()
 
@@ -283,151 +280,6 @@ class IdsFetcher:
 
         return product_ids
 
-    def wait_with_backoff(self, backoff_factor: float = None, request_attempts: int = None, msg: str = "Connection error") -> None:
-        """
-        Wait for a certain period based on the backoff factor and the number of request attempts.
-
-        Args:
-            request_attempts (int): The current number of request attempts.
-            backoff_factor (float): The backoff factor to calculate wait time.
-        """
-        if backoff_factor is None:
-            backoff_factor = self.backoff_factor
-        if request_attempts is None:
-            request_attempts = self.request_attempts
-        self.logger.warning(f"{msg}. Attempt number {request_attempts}")
-        wait_time = min(backoff_factor * (2 ** request_attempts), 2 ** 11)
-        self.logger.info(f"Retrying in {wait_time} seconds...")
-        time.sleep(wait_time)
-
-    def make_connection(self,
-                        host: str,
-                        timeout: float = 2.5,
-                        pm_timeout: int = 10,
-                        put_to_sleep: bool = True
-                        ) -> Tuple[http.client.HTTPSConnection, Optional[str]]:
-        """
-        Establish a new HTTP connection, optionally using a proxy.
-
-        Args:
-            timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
-            pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
-            put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to True.
-
-        Returns:
-            Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
-        """
-
-        def direct_connection() -> http.client.HTTPSConnection:
-            if self.request_attempts > 0:
-                self.wait_with_backoff(self.request_attempts, self.backoff_factor, msg="Direct connection failed")
-            return http.client.HTTPSConnection(host)
-
-        if not self.use_direct_connection:
-            if self.conn is not None:  # Close the previous connection before establishing a new one
-                self.logger.debug(f"Closing connection for batch {self.request_counter // self.batch_size}")
-                self.conn.close()
-                if self.current_proxy_ip and put_to_sleep:
-                    self.logger.debug(f"Setting to sleep proxy {self.current_proxy_ip}")
-                    self.proxy_manager.sleep_proxy(self.current_proxy_ip, timeout)
-                    self.proxy_ind = 0
-            self.logger.debug(f"Establishing connection for batch {self.request_counter // self.batch_size + 1}")
-            self.headers['User-Agent'] = self.ua.random
-            try:
-                self.logger.debug(f"Picking a proxy and establishing a connection")
-                self.conn, self.current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
-                # return self.conn, self.current_proxy_ip
-            except Exception:
-                self.logger.warning("No proxy connection!")
-                self.conn = None
-                self.current_proxy_ip = None
-                # Attempting direct connection if proxy fails
-        else:
-            self.logger.debug(f"Establishing direct connection to {host}")
-            self.conn = direct_connection()
-        # return self.conn, self.current_proxy_ip
-
-    def check_for_json_errors(self, json_data: Dict[str, Any]) -> List[int]:
-        errors = []
-        if 'errors' in json_data:
-            try:
-                error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
-                for error_message in error_messages:
-                    self.logger.warning(f'Response JSON Error: {error_message}')
-                    if '429' in error_message:
-                        errors.append(429)
-                    if '401' in error_message:
-                        errors.append(401)
-                errors = list(set(errors))
-            except Exception as e:
-                self.logger.error(f"Failed to check for JSON response errors: {e}")
-        if len(errors) > 0:
-            self.logger.warning(f"JSON response errors: {errors}")
-        return errors
-
-    def process_errors(self,
-                       response: http.client.HTTPResponse,
-                       err_code: Optional[List[int]],
-                       host: str
-                       ) -> bool:
-        # if multiple errors, process the heights error code
-        if isinstance(err_code, list):
-            err_code = err_code[-1]
-
-        request_type = ""
-        if 'graphql' in host:
-            request_type = "GraphQL"
-
-        try:
-            if err_code == 401:
-                self.logger.warning(f"{response.status}: Authorization failed during a category {request_type} request; retrieving a new token...")
-                self.auth_token = self.token_manager.get_token_instance()
-                self.headers['Authorization'] = f'Bearer {self.auth_token}'
-                if self.request_attempts > 1:
-                    self.make_connection(host, pm_timeout=self.current_pm_timeout)
-                else:
-                    self.make_connection(host, pm_timeout=self.current_pm_timeout, put_to_sleep=False)
-            elif err_code == 429:
-                retry_time = int(response.headers.get("Retry-After", 1))
-                self.logger.warning(f"429: Blocked by the server due to too many {request_type} requests. Server cool down time: {retry_time}")
-                self.current_pm_timeout = max(retry_time, self.current_pm_timeout)
-                self.make_connection(host, pm_timeout=self.current_pm_timeout, timeout=retry_time)
-            else:
-                msg = f"Bad status on category {request_type} response: {response.status}"
-                if self.request_attempts > self.request_retries:
-                    raise ValueError(msg)
-                self.logger.warning(f"{msg}, retrying...")
-                self.wait_with_backoff(msg=msg)
-                self.make_connection(host, pm_timeout=self.current_pm_timeout, timeout=retry_time)
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to process {request_type} response errors: {e}")
-            return False
-        finally:
-            self.request_attempts += 1
-
-    def process_response(self, response: http.client.HTTPResponse, host: str) -> Tuple[Dict[str, Any], List[int]]:
-        if response.status != 200:
-            self.process_errors(response, response.status, host)
-            return None, [response.status]
-
-        response_data = response.read()
-        content_encoding = response.getheader('Content-Encoding')
-        if content_encoding:
-            response_data = self.decompress_http_response(response_data, content_encoding)
-        decoded_data = response_data.decode('utf-8')
-
-        if not decoded_data:
-            raise ValueError("Empty response data from a category GraphQL request.")
-
-        json_data = json.loads(decoded_data)
-        json_errors = self.check_for_json_errors(json_data)
-        if len(json_errors) > 0:
-            self.process_errors(response, json_errors, host)
-            return json_data, json_errors
-
-        return json_data, []
-
     def get_product_ids_by_category(self,
                                     category_id: int,
                                     amount: int = 0,
@@ -460,28 +312,87 @@ class IdsFetcher:
 
         self.payload_json["variables"]["queryInput"]["pagination"]["limit"] = page_limit
 
-        self.current_pm_timeout = self.proxy_manager_timeout
+        proxy_timeout = self.proxy_timeout
+        proxy_manager_timeout = self.proxy_manager_timeout
 
         query_sort_ind = 0
         items_offset = 0
         data_list: List[int] = []
         prev_data: List[int] = []
-        self.request_attempts = 0
+        request_attempts = 0
         done = False
         status: Optional[int] = None
 
         # conn: Optional[http.client.HTTPSConnection] = None
         # current_proxy_ip: Optional[str] = None
         # ind = 0
-        self.proxy_ind = self.request_counter
+        proxy_ind = self.request_counter
+
+        def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
+            """
+            Wait for a certain period based on the backoff factor and the number of request attempts.
+
+            Args:
+                request_attempts (int): The current number of request attempts.
+                backoff_factor (float): The backoff factor to calculate wait time.
+            """
+            self.logger.info(f"Server rejected. Attempt number {request_attempts}")
+            wait_time = min(backoff_factor * (2 ** request_attempts), 2 ** 7)
+            self.logger.info(f"Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+
+        def make_connection(timeout: float = proxy_timeout if proxy_timeout else 2.5,
+                            pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
+                            put_to_sleep: bool = True):  # -> Tuple[http.client.HTTPSConnection, Optional[str]]:
+            """
+            Establish a new HTTP connection, optionally using a proxy.
+
+            Args:
+                timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
+                pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
+                put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to False.
+
+            Returns:
+                Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
+            """
+            # nonlocal conn
+            # nonlocal current_proxy_ip
+            nonlocal proxy_ind
+
+            def direct_connection() -> http.client.HTTPSConnection:
+                if request_attempts > 0:
+                    wait_with_backoff(request_attempts, backoff_factor)
+                return http.client.HTTPSConnection(host)
+
+            if not self.use_direct_connection:
+                if self.conn is not None:  # Close the previous connection before establishing a new one
+                    self.logger.debug(f"Closing connection for batch {self.request_counter // self.batch_size}")
+                    self.conn.close()
+                    if self.current_proxy_ip and put_to_sleep:
+                        self.logger.debug(f"Setting to sleep proxy {self.current_proxy_ip}")
+                        self.proxy_manager.sleep_proxy(self.current_proxy_ip, timeout)
+                        proxy_ind = 0
+                self.logger.debug(f"Establishing connection for batch {self.request_counter // self.batch_size + 1}")
+                self.headers['User-Agent'] = self.ua.random
+                try:
+                    self.logger.debug("Picking a proxy and establishing a connection")
+                    self.conn, self.current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
+                except Exception:
+                    self.logger.warning(f"No proxy connection! Establishing direct connection to {host}")
+                    self.conn = direct_connection()
+                    self.current_proxy_ip = None
+            else:
+                self.logger.debug(f"Establishing direct connection to {host}")
+                self.conn = direct_connection()
+                self.current_proxy_ip = None
 
         try:
-            while not done and self.request_attempts <= request_retries:
-                if self.proxy_ind % self.batch_size == 0:
-                    self.make_connection(host, pm_timeout=self.current_pm_timeout)
-                if self.conn is None:
-                    raise ConnectionError("Failed to establish a connection to the server")
+            if proxy_ind % self.batch_size == 0:
+                # if self.request_counter % self.batch_size == 0:
+                # conn, current_proxy_ip = make_connection()
+                make_connection()
 
+            while not done and request_attempts <= request_retries:
                 self.payload_json["variables"]["queryInput"]["categoryId"] = f"{category_id}"
                 self.payload_json["variables"]["queryInput"]["pagination"]["offset"] = items_offset
                 self.payload_json["variables"]["queryInput"]["sort"] = self.query_sort_types[query_sort_ind]
@@ -489,45 +400,118 @@ class IdsFetcher:
                 try:
                     self.conn.request("POST", endpoint, json.dumps(self.payload_json), headers=self.headers)
                     response = self.conn.getresponse()
+                    status = response.status
+                    if response.status == 200:
+                        response_data = response.read()
+                        content_encoding = response.getheader('Content-Encoding')
 
-                    json_data, response_errors = self.process_response(response, host)
-                    if response_errors:
-                        if json_data is not None:
-                            continue
+                        if content_encoding:
+                            response_data = self.decompress_http_response(response_data, content_encoding)
+                        decoded_data = response_data.decode('utf-8')
 
-                    data = self.get_ids_from_json(json_data)
-                    if amount == 0:
-                        amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
-                    if len(data) > 0:
-                        data_list.extend(data)
-                    else:
-                        done = True
-                        amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
+                        if not decoded_data:
+                            raise ValueError("Empty response data from GraphQL query")
 
-                    self.logger.debug(f'Collected {len(data)} of total {len(data_list)} collected items in category {category_id}')
+                        json_data = json.loads(decoded_data)
 
-                    items_offset += min(page_limit, amount - len(data_list))
-                    if (len(data_list) >= amount) or (data == prev_data):
-                        done = True
+                        # Check for errors in the response
+                        if 'errors' in json_data:
+                            error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
+                            error_429 = False
+                            error_401 = False
+                            for error_message in error_messages:
+                                self.logger.warning(f'GraphQL Error: {error_message}')
+                                if '429' in error_message:
+                                    error_429 = True
+                                if '401' in error_message:
+                                    error_401 = True
 
-                    # If reached the offset limit, try other types of query sorting to extract maximum data
-                    if items_offset >= self.offset_limit:
-                        if query_sort_ind < len(self.query_sort_types) - 1:
-                            items_offset = 0
-                            query_sort_ind += 1
-                            self.logger.info(f"Reached the API offset limit of {self.offset_limit}. Switching to sort type {self.query_sort_types[query_sort_ind]}")
-                            # Add offset_limit to prevent stopping (the amount is now irrelevant)
-                            amount += self.offset_limit
+                            if error_429:
+                                retry_time = int(response.headers.get("Retry-After", 1))
+                                self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
+                                status = 429
+
+                                proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                                # conn, current_proxy_ip = make_connection(timeout=retry_time)
+                                make_connection(timeout=max(retry_time, self.proxy_timeout))
+
+                                request_attempts += 1
+                                continue
+                            if error_401:  # Authorization failed
+                                self.logger.warning(f"{response.status}: Authorization failed during the GraphQL request from an error message; retrieving a new token...")
+                                self.auth_token = self.token_manager.get_token_instance()
+                                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                                request_attempts += 1
+                                if request_attempts > 1:
+                                    # conn, current_proxy_ip = make_connection()
+                                    make_connection()
+                                else:
+                                    # conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                                    make_connection(put_to_sleep=False)
+                                continue
+                        data = self.get_ids_from_json(json_data)
+                        if amount == 0:
+                            amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
+                        if len(data) > 0:
+                            data_list.extend(data)
                         else:
                             done = True
+                            amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
+
+                        self.logger.debug(f'Collected {len(data)} of total {len(data_list)} collected items in category {category_id}')
+
+                        items_offset += min(page_limit, amount - len(data_list))
+                        if (len(data_list) >= amount) or (data == prev_data):
+                            done = True
+
+                        # If reached the offset limit, try other types of query sorting to extract maximum data
+                        if items_offset >= self.offset_limit:
+                            if query_sort_ind < len(self.query_sort_types) - 1:
+                                items_offset = 0
+                                query_sort_ind += 1
+                                self.logger.info(f"Reached the API offset limit of {self.offset_limit}. Switching to sort type {self.query_sort_types[query_sort_ind]}")
+                                # Add offset_limit to prevent stopping (the amount is now irrelevant)
+                                amount += self.offset_limit
+                            else:
+                                done = True
 
                         prev_data = data
-                        self.request_attempts = 0
-                        self.current_pm_timeout = self.proxy_manager_timeout
+                        request_attempts = 0
                         # ind += 1
-                        self.proxy_ind += 1
+                        proxy_ind += 1
                         self.request_counter += 1
 
+                        if proxy_ind % self.batch_size == 0:
+                            make_connection()
+
+                    elif response.status == 401:  # Authorization failed
+                        self.logger.warning(f"{response.status}: Authorization failed during the GraphQL request; retrieving a new token...")
+                        self.auth_token = self.token_manager.get_token_instance()
+                        self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                        request_attempts += 1
+                        if request_attempts > 1:
+                            # conn, current_proxy_ip = make_connection()
+                            make_connection()
+                        else:
+                            # conn, current_proxy_ip = make_connection(put_to_sleep=False)
+                            make_connection(put_to_sleep=False)
+
+                    elif response.status == 429:  # Too many requests
+                        retry_time = int(response.headers.get("Retry-After", 1))
+                        self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
+
+                        proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
+                        # conn, current_proxy_ip = make_connection(timeout=retry_time)
+                        make_connection(timeout=max(retry_time, self.proxy_timeout))
+
+                        request_attempts += 1
+                        continue
+                    else:
+                        request_attempts += 1
+                        if request_attempts > request_retries:
+                            raise ValueError(f"Bad response status on a GraphQL query: {response.status}")
+                        self.logger.warning(f"Bad response status on a GraphQL query: {response.status}, retrying...")
+                        wait_with_backoff(request_attempts, backoff_factor)
                 except Exception as e:
                     self.logger.error(f'Failed to receive data from a GraphQL query: {e}')
                     break

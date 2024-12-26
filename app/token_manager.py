@@ -152,8 +152,8 @@ class TokenManager:
             time.sleep(2 ** (request_attempts - 1))
         if self.proxy_manager:
             if proxy is not None:
-                logger.info(f"Setting proxy {proxy.ip}:{proxy.ports.get(self.proxy_scheme)} to sleep")
-                self.proxy_manager.sleep_proxy(proxy.ip, time_out)
+                logger.info(f"Setting proxy {proxy.ip}:{proxy.ports.get(self.proxy_scheme)} to pause")
+                self.proxy_manager.pause_proxy(proxy.ip, time_out)
             proxy = self.proxy_manager.get_available_proxy(timeout=60)  # Adjust timeout as needed
             logger.debug(f"TokenManager proxy selected: {proxy.ip}:{proxy.ports.get(self.proxy_scheme)}")
             self.use_proxy = True
