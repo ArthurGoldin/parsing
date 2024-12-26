@@ -772,10 +772,11 @@ class ProxyManager:
 
             # Check for sleeping proxies
             sleeping_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.SLEEPING]
+            paused_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.PAUSED]
 
-            if not sleeping_proxies:
+            if not sleeping_proxies and not paused_proxies:
                 self.check_expired_proxies()
-                logger.warning("No active or sleeping proxies available raising an error.")
+                logger.warning("No active, sleeping or paused proxies available raising an error.")
                 raise ProxyUnavailableError()
 
             # Calculate remaining time if timeout is set
