@@ -13,9 +13,10 @@ import uuid
 import os
 from fake_useragent import UserAgent
 from datetime import datetime
+
 from save_and_load_data import load_last_saved_json, save_to_file
-from send_data_to_db import send_message
-from proxy_manager import ProxyManager
+from send_data_to_db import send_message_broker, send_message_redis
+from proxy_manager import ProxyManager, ProxyUnavailableError
 from token_manager import TokenManager
 from ids_fetcher import IdsFetcher
 from typing import List, Tuple, Dict, Any, Optional
@@ -55,13 +56,16 @@ class ProductFetcher:
     def __init__(self,
                  proxy_manager: Optional[ProxyManager] = None,
                  token_manager: Optional[TokenManager] = None,
-                 config_path: str = config_path,
-                 logging_path: str = logging_config_path,
+                 init_time: str = None,
                  use_direct_connection: Optional[bool] = None,
                  proxy_timeout: Optional[float] = None,
                  proxy_manager_timeout: Optional[int] = None,
                  batch_size: Optional[int] = None,
-                 package_size: Optional[int] = None) -> None:
+                 package_size: Optional[int] = None,
+                 backoff_factor: Optional[int] = None,
+                 request_retries: Optional[int] = None,
+                 config_path: str = config_path,
+                 logging_path: str = logging_config_path,) -> None:
         """
         Initialize the ProductFetcher with configuration and logging.
 
@@ -74,6 +78,8 @@ class ProductFetcher:
             batch_size (Optional[int], optional): Number of products to fetch in a batch. Defaults to None.
         """
         # Configure logging
+        self.init_time = init_time if init_time is not None else datetime.now().strftime("%Y%m%d")
+        self.id = str(uuid.uuid4())[0:7]
         try:
             logging.config.fileConfig(logging_path)
             self.logger = logging.getLogger('product_fetcher')
@@ -96,6 +102,7 @@ class ProductFetcher:
         # URL
         self.main_url = self.config.get('urls', 'main_url')
         self.product_api_url = self.config.get('urls', 'product_api_url')
+        self.graphql_url = self.config.get('urls', 'graphql_url')
 
         # Accept language
         self.accept_language = 'ru-RU' if 'ru' in str.lower(self.config.get('product_fetching', 'language')) else 'uz-UZ'
@@ -115,6 +122,20 @@ class ProductFetcher:
             int(self.config.get('product_fetching', 'batch_size'))
         self.package_size = package_size if package_size is not None else \
             int(self.config.get('product_fetching', 'package_size'))
+        self.backoff_factor = backoff_factor if backoff_factor is not None else \
+            int(self.config.get('product_fetching', 'conn_time_backoff_factor'))
+        self.request_retries = request_retries if request_retries is not None else \
+            int(self.config.get('product_fetching', 'connection_retries'))
+
+        # Connection variables
+        self.proxy_ind: int = 0
+        self.conn: http.client.HTTPSConnection = None
+        self.current_proxy_ip: str = None
+        self.request_attempts = 0
+        self.current_pm_timeout = self.proxy_manager_timeout
+        self.status = 0
+
+        self.no_img_ids: List[int] = []
 
         self.brands_by_category = load_last_saved_json(
             f'{self.data_dir}/{self.config.get("storage", "brands_sub_dir")}'
@@ -124,7 +145,7 @@ class ProductFetcher:
         self.proxy_manager: Optional[ProxyManager] = proxy_manager
         self.shut_down_proxy_scheduler = False if proxy_manager is not None else True
         self.token_manager: Optional[TokenManager] = token_manager
-        self.auth_token: Optional[str] = self.token_manager.get_token_instance() if token_manager is not None else None
+        self.auth_token: Optional[str] = self.token_manager.token if token_manager is not None else None
 
         self.ua = UserAgent()
 
@@ -196,6 +217,18 @@ class ProductFetcher:
         else:
             return response_data
 
+    def send_img_obj_to_broker(self, img_url: str, product_id):
+        obj_key = f'{product_id}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+        img_data = {
+            "url": img_url,
+            "image_category": 'product',
+            "object_key": obj_key
+        }
+        try:
+            send_message_broker(img_data, host=self.broker_host, port=self.broker_port, queue_name="products_images")
+        except Exception as e:
+            self.logger.error(f"Failed to send image data to broker 'products_images': {e}")
+
     def parse_product(self, json_data: Dict[str, Any], send_img_to_broker) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str] | str]]:
         """
         Parse product information from the given JSON data.
@@ -245,7 +278,7 @@ class ProductFetcher:
                     if img_url:
                         return img_url
                 except Exception as e:
-                    self.logger.error(f"Failed to retrieve image URL: {e}")
+                    self.logger.error(f"Failed to retrieve an image URL: {e}")
             return None
 
         try:
@@ -261,33 +294,14 @@ class ProductFetcher:
             if not payload:
                 raise ValueError("Payload or data is missing in the JSON file.")
 
-            # image_path = download_image(payload.get('photos', {})[0].get('photo', {}).get('800', {}).get('high'), payload.get('id'), f'{self.data_dir}/{self.images_dir}')
-            # image_path = "N/A"
-
-            # if img_url:
-            #     try:
-            #         obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
-            #         res = upload_image_from_url(image_url=img_url, object_key=obj_key)
-            #         if res:
-            #             image_path = res["url"] if res["url"] is not None else "N/A"
-            #     except Exception as e:
-            #         self.logger.error(f"Failed to upload an image: {e}")
-
+            # Send image to broker
             if len(payload.get('photos', {})) > 0:
                 img_url = get_image_url(payload.get('photos', {})[0].get('photo', {}))
                 if send_img_to_broker:
-                    obj_key = f'{payload.get('id')}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
-                    img_data = {
-                        "url": img_url,
-                        "image_category": 'product',
-                        "object_key": obj_key
-                    }
-                    try:
-                        send_message(img_data, host=self.broker_host, port=self.broker_port, queue_name="products_images")
-                    except Exception as e:
-                        self.logger.error(f"Failed to send image data to broker 'products_images': {e}")
+                    self.send_img_obj_to_broker(img_url, payload.get('id'))
             else:
                 img_url = ""
+                self.no_img_ids.append(payload.get('id'))
 
             characteristic_data = payload.get('characteristics', [])
 
@@ -369,11 +383,165 @@ class ProductFetcher:
         except Exception as e:
             return None, str(e)
 
+    def wait_with_backoff(self, backoff_factor: float = None, request_attempts: int = None, msg: str = "Connection error") -> None:
+        """
+        Wait for a certain period based on the backoff factor and the number of request attempts.
+
+        Args:
+            request_attempts (int): The current number of request attempts.
+            backoff_factor (float): The backoff factor to calculate wait time.
+        """
+        if backoff_factor is None:
+            backoff_factor = self.backoff_factor
+        if request_attempts is None:
+            request_attempts = self.request_attempts
+        self.logger.warning(f"{msg}. Attempt number {request_attempts}")
+        wait_time = min(backoff_factor * (2 ** request_attempts), 3600)
+        self.logger.info(f"Retrying in {wait_time} seconds...")
+        time.sleep(wait_time)
+
+    def make_connection(self,
+                        host: str,
+                        timeout: float = 2.5,
+                        pm_timeout: int = 10,
+                        put_to_sleep: bool = True
+                        ) -> Tuple[http.client.HTTPSConnection, Optional[str]]:
+        """
+        Establish a new HTTP connection, optionally using a proxy.
+
+        Args:
+            timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
+            pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
+            put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to True.
+
+        Returns:
+            Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
+        """
+
+        def direct_connection() -> http.client.HTTPSConnection:
+            if self.request_attempts > 0:
+                self.wait_with_backoff(self.request_attempts, self.backoff_factor, msg="Direct connection failed")
+            return http.client.HTTPSConnection(host)
+
+        if not self.use_direct_connection:
+            if self.conn is not None:  # Close the previous connection before establishing a new one
+                self.logger.debug(f"Closing connection for batch {self.proxy_ind // self.batch_size}")
+                self.conn.close()
+                if self.current_proxy_ip and put_to_sleep:
+                    self.logger.debug(f"Setting to sleep proxy {self.current_proxy_ip}")
+                    self.proxy_manager.sleep_proxy(self.current_proxy_ip, timeout)
+            self.logger.debug(f"Establishing connection for batch {self.proxy_ind // self.batch_size + 1}")
+            self.headers['User-Agent'] = self.ua.random
+            try:
+                self.logger.debug(f"Picking a proxy and establishing a connection")
+                self.conn, self.current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
+                # return self.conn, self.current_proxy_ip
+            except ProxyUnavailableError as e:
+                self.logger.error(f"Proxy error: {e}")
+                if "expired" in str(e).lower():
+                    self.status = 30  # Proxies are expired
+                else:
+                    self.status = 31  # Proxies are unavailable
+                self.conn = None
+                self.current_proxy_ip = None
+            except Exception:
+                self.logger.warning("No proxy connection!")
+                self.conn = None
+                self.current_proxy_ip = None
+                self.status = 32  # Unknown proxy error
+                # Attempting direct connection if proxy fails
+        else:
+            self.logger.debug(f"Establishing direct connection to {host}")
+            self.conn = direct_connection()
+        # return self.conn, self.current_proxy_ip
+
+    def check_for_json_errors(self, json_data: Dict[str, Any]) -> List[int]:
+        errors = []
+        if 'errors' in json_data:
+            try:
+                error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
+                for error_message in error_messages:
+                    self.logger.warning(f'Response JSON API Error: {error_message}')
+                    if '429' in error_message:
+                        errors.append(429)
+                    if '401' in error_message:
+                        errors.append(401)
+                errors = list(set(errors))
+            except Exception as e:
+                self.logger.error(f"Failed to check for JSON response errors: {e}")
+        if len(errors) > 0:
+            self.logger.warning(f"JSON response errors: {errors}")
+        return errors
+
+    def process_errors(self,
+                       response: http.client.HTTPResponse,
+                       err_code: Optional[List[int]],
+                       host: str
+                       ) -> bool:
+        # if multiple errors, process the heights error code
+        if isinstance(err_code, list):
+            err_code = err_code[-1]
+
+        request_type = ""
+        if 'api' in host:
+            request_type = "API"
+        elif 'graphql' in host:
+            request_type = "GraphQL"
+
+        try:
+            if err_code == 401:
+                self.logger.warning(f"{response.status}: Authorization failed during a product {request_type} request; retrieving a new token...")
+                self.auth_token = self.token_manager.get_token_instance()
+                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                if self.request_attempts > 1:
+                    self.make_connection(host, pm_timeout=self.current_pm_timeout)
+                else:
+                    self.make_connection(host, pm_timeout=self.current_pm_timeout, put_to_sleep=False)
+            elif err_code == 429:
+                retry_time = int(response.headers.get("Retry-After", 1))
+                self.logger.warning(f"429: Blocked by the server due to too many {request_type} requests. Server cool down time: {retry_time}")
+                self.current_pm_timeout = max(retry_time, self.current_pm_timeout)
+                self.make_connection(host, pm_timeout=self.current_pm_timeout, timeout=retry_time)
+            else:
+                msg = f"Bad status on product {request_type} response: {response.status}"
+                if self.request_attempts > self.request_retries:
+                    raise ValueError(msg)
+                self.logger.warning(f"{msg}, retrying...")
+                self.wait_with_backoff(msg=msg)
+                self.make_connection(host, pm_timeout=self.current_pm_timeout, timeout=retry_time)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to process {request_type} response errors: {e}")
+            return False
+        finally:
+            self.request_attempts += 1
+
+    def process_response(self, response: http.client.HTTPResponse, host: str) -> Tuple[Dict[str, Any], List[int]]:
+        if response.status != 200:
+            # self.logger.warning(f"Bad status on product API response: {response.status}")
+            self.process_errors(response, response.status, host)
+            return None, [response.status]
+
+        response_data = response.read()
+        content_encoding = response.getheader('Content-Encoding')
+        if content_encoding:
+            response_data = self.decompress_http_response(response_data, content_encoding)
+        decoded_data = response_data.decode('utf-8')
+
+        if not decoded_data:
+            raise ValueError("Empty response data from product API")
+
+        json_data = json.loads(decoded_data)
+        json_errors = self.check_for_json_errors(json_data)
+        if len(json_errors) > 0:
+            self.process_errors(response, json_errors, host)
+            return json_data, json_errors
+
+        return json_data, []
+
     def fetch_products(self,
                        p_ids: List[int],
                        ind: int = 0,
-                       request_retries: int = 10,
-                       backoff_factor: int = 1,
                        save_data: bool = True,
                        send_to_db: bool = True,
                        **kwargs: Any) -> Tuple[int, int]:  # Tuple[List[Dict[str, Any]], List[int], int]:
@@ -396,7 +564,6 @@ class ProductFetcher:
             x-Tuple[List[Dict[str, Any]], List[int], int]:
                 x- A tuple containing the list of product details, the list of failed product IDs, and the status code.
         """
-        start_time = time.time()
 
         host = self.product_api_url.split("//")[1].split('/')[0]
         endpoint_base = self.product_api_url.split(f'https://{host}')[1]
@@ -410,14 +577,10 @@ class ProductFetcher:
         total_products_count = ind
         product_count = 0
         failed_product_ids: List[int] = []
-        request_attempts = 0
-        status = 0
-
-        conn: Optional[http.client.HTTPSConnection] = None
-        current_proxy_ip: Optional[str] = None
-        proxy_ind = 0
-        proxy_timeout = self.proxy_timeout
-        proxy_manager_timeout = self.proxy_manager_timeout
+        self.request_attempts = 0
+        self.status = 0
+        self.proxy_ind = ind
+        self.current_pm_timeout = self.proxy_manager_timeout
 
         def save_data_to(data_list, file_name: Optional[str] = None):
             if save_data:
@@ -429,220 +592,91 @@ class ProductFetcher:
                     file_name = f'{max(0, total_products_count - self.package_size)}-{total_products_count}'
                 save_to_file(data_to_save,
                              file_name,
-                             f"{self.products_dir}/{datetime.now().strftime("%Y%m%d")}",
-                             override_file=True)
-
-        def wait_with_backoff(request_attempts: int, backoff_factor: float) -> None:
-            """
-            Wait for a certain period based on the backoff factor and the number of request attempts.
-
-            Args:
-                request_attempts (int): The current number of request attempts.
-                backoff_factor (float): The backoff factor to calculate wait time.
-            """
-            self.logger.warning(f"Server rejected. Attempt number {request_attempts}")
-            wait_time = min(backoff_factor * (2 ** request_attempts), 2 ** 7)
-            self.logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-
-        def make_connection(timeout: float = proxy_timeout if proxy_timeout else 10,
-                            pm_timeout: int = proxy_manager_timeout if proxy_manager_timeout else 10,
-                            put_to_sleep: bool = True) -> Tuple[http.client.HTTPSConnection, Optional[str]]:
-            """
-            Establish a new HTTP connection, optionally using a proxy.
-
-            Args:
-                timeout (float, optional): Timeout for the connection. Defaults to proxy_timeout or 10.
-                pm_timeout (int, optional): Timeout for the proxy manager. Defaults to proxy_manager_timeout or 10.
-                put_to_sleep (bool, optional): Whether to put the proxy to sleep after use. Defaults to True.
-
-            Returns:
-                Tuple[http.client.HTTPSConnection, Optional[str]]: The HTTPS connection and the proxy IP if used.
-            """
-            nonlocal conn
-            nonlocal current_proxy_ip
-            nonlocal proxy_ind
-
-            def direct_connection() -> http.client.HTTPSConnection:
-                if request_attempts > 0:
-                    wait_with_backoff(request_attempts, backoff_factor)
-                return http.client.HTTPSConnection(host)
-
-            if not self.use_direct_connection:
-                if conn is not None:  # Close the previous connection before establishing a new one
-                    self.logger.debug(f"Closing connection for batch {ind // self.batch_size}")
-                    conn.close()
-                    if current_proxy_ip and put_to_sleep:
-                        self.logger.debug(f"Setting to sleep proxy {current_proxy_ip}")
-                        self.proxy_manager.sleep_proxy(current_proxy_ip, timeout)
-                        proxy_ind = 0
-                self.logger.debug(f"Establishing connection for batch {ind // self.batch_size + 1}")
-                self.headers['User-Agent'] = self.ua.random
-                try:
-                    self.logger.debug(f"Picking a proxy and establishing a connection")
-                    conn, current_proxy_ip = self.proxy_manager.make_connection(host, pm_timeout)
-                    return conn, current_proxy_ip
-                except Exception:
-                    self.logger.warning("No proxy connection!")
-                    # Attempting direct connection if proxy fails
-            self.logger.debug(f"Establishing direct connection to {host}")
-            conn = direct_connection()
-            return conn, current_proxy_ip
+                             f"{self.products_dir}/{datetime.now().strftime("%Y%m%d")}", override_file=True)
 
         self.logger.info(f'Total products to parse {len(p_ids)}. Parsing...')
-
         try:
             while ind < len(p_ids):
-                if request_attempts > request_retries:
-                    self.logger.error('Exceeded max number of retries!')
+                if self.request_attempts > self.request_retries:
+                    self.logger.error(f'Exceeded max number of {self.request_retries} retries!')
                     break
                 try:
-                    if proxy_ind % self.batch_size == 0:
-                        conn, current_proxy_ip = make_connection()
+                    if self.proxy_ind % self.batch_size == 0:
+                        self.make_connection(host, pm_timeout=self.current_pm_timeout)
+                    if self.conn is None:
+                        raise ConnectionError("Failed to establish a connection to the server for an API request.")
 
                     product_id = p_ids[ind]
                     endpoint = f'{endpoint_base}{product_id}'
                     self.headers['path'] = f'{endpoint}'
 
-                    conn.request("GET", endpoint, headers=self.headers)
-                    response = conn.getresponse()
+                    self.conn.request("GET", endpoint, headers=self.headers)
+                    response = self.conn.getresponse()
 
-                    if response.status == 200:
-                        response_data = response.read()
-                        content_encoding = response.getheader('Content-Encoding')
-                        if content_encoding:
-                            response_data = self.decompress_http_response(response_data, content_encoding)
-                        decoded_data = response_data.decode('utf-8')
-
-                        if not decoded_data:
-                            raise ValueError("Empty response data from product API")
-
-                        json_data = json.loads(decoded_data)
-                        # save_to_file(json_data, f"pr_response_{product_id}", "")
-                        if 'errors' in json_data:
+                    json_data, response_errors = self.process_response(response, host)
+                    if response_errors:
+                        if json_data is not None:
+                            self.logger.warning(f"Saving errors in JSON data for product ID {product_id}")
                             save_data_to(json_data, f"response_error_{product_id}")
-                            # save_to_file(json_data, f"response_error_{product_id}", "products")
-                            error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
-                            error_429 = False
-                            error_401 = False
-                            for error_message in error_messages:
-                                self.logger.warning(f'Product API Error: {error_message}')
-                                if '429' in error_message:
-                                    error_429 = True
-                                if '401' in error_message:
-                                    error_401 = True
+                        continue
 
-                            if error_429:
-                                retry_time = int(response.headers.get("Retry-After", 1))
-                                self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
-                                # wait_with_backoff(request_attempts, backoff_factor)
-                                proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                                conn, current_proxy_ip = make_connection(timeout=retry_time)
-                                request_attempts += 1
-                                continue
-
-                            if error_401:
-                                self.logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
-
-                                self.auth_token = self.token_manager.get_token_instance()
-                                self.headers['Authorization'] = f'Bearer {self.auth_token}'
-                                request_attempts += 1
-                                if request_attempts > 1:
-                                    conn, current_proxy_ip = make_connection()
-                                else:
-                                    conn, current_proxy_ip = make_connection(put_to_sleep=False)
-                                continue
-
+                    if json_data is None:
+                        self.logger.warning(f"Failed to receive data from a product API response for product ID {product_id}, but no errors were found.")
+                        failed_product_ids.append(product_id)
+                    else:
                         data, errors = self.parse_product(json_data, send_to_db)
                         if data:
                             data_list.append(data)
                             total_products_count += 1
                             product_count += 1
                         else:
-                            self.logger.warning(f'Could not parse data from product ID {product_id}: {errors}')
+                            self.logger.warning(f'Failed to parse data from JSON for product ID {product_id}: {errors}')
                             failed_product_ids.append(product_id)
 
-                        request_attempts = 0
-                        proxy_manager_timeout = 10
-                        proxy_ind += 1
-                        ind += 1
+                    self.request_attempts = 0
+                    self.current_pm_timeout = self.proxy_manager_timeout
+                    self.proxy_ind += 1
+                    ind += 1
 
-                        if product_count % self.batch_size == 0:
-                            self.logger.debug(f"Processed {ind} products.")
-                            self.logger.debug(f"Fetched {product_count} products.")
-                        if len(data_list) % self.package_size == 0:
-                            if data_list and save_data:
-                                save_data_to(data_list)
-                            if send_to_db:
-                                data_to_send = {
-                                    'platform': 'UZUM',
-                                    'data': [data_list] if len(data_list) == 1 else data_list
-                                }
-                                # Optionally, send data to DB or other services
-                                try:
-                                    send_message(data_to_send, host=self.broker_host, port=self.broker_port)
-                                except Exception as e:
-                                    self.logger.error(f"Failed to send to Broker: {e}")
-                            data_list = []
-                            self.logger.debug(f'Processed {ind} products.')
-
-                    elif response.status == 401:
-                        self.logger.warning(f"{response.status}: Authorization failed during the product API request; retrieving a new token...")
-
-                        self.auth_token = self.token_manager.get_token_instance()
-                        self.headers['Authorization'] = f'Bearer {self.auth_token}'
-                        request_attempts += 1
-                        if request_attempts > 1:
-                            conn, current_proxy_ip = make_connection()
-                        else:
-                            conn, current_proxy_ip = make_connection(put_to_sleep=False)
-                        continue
-
-                    elif response.status == 429:  # need to avoid this
-                        retry_time = int(response.headers.get("Retry-After", 1))
-                        self.logger.warning(f"429 (JSON errors): Blocked by the server due to too many requests. Server cool down time: {retry_time}")
-
-                        request_attempts += 1
-
-                        proxy_manager_timeout = max(retry_time, proxy_manager_timeout)
-                        conn, current_proxy_ip = make_connection(timeout=retry_time)
-
-                        continue
-                    else:
-                        request_attempts += 1
-                        if request_attempts > request_retries:
-                            raise ValueError(f"Bad response status on a product API: {response.status}")
-                        self.logger.warning(f"Bad response status on a product API: {response.status}, retrying...")
-                        wait_with_backoff(request_attempts=request_attempts, backoff_factor=backoff_factor)
-                        conn, current_proxy_ip = make_connection(timeout=retry_time)
-                        continue
-                except Exception as e:
-                    self.logger.error(f'Failed to receive data from a product API for product ID {product_id}: {e}')
-                    request_attempts += 1
-                    if request_attempts > request_retries:
-                        self.logger.error("Exceeded maximum number of retries! Exiting parser...")
-
-                        if save_data and data_list:
+                    if product_count % self.batch_size == 0:
+                        self.logger.debug(f"Processed {ind} products.")
+                        self.logger.debug(f"Fetched {product_count} products.")
+                    if len(data_list) % self.package_size == 0:
+                        if data_list and save_data:
                             save_data_to(data_list)
+                        if send_to_db:
+                            data_to_send = {
+                                'platform': 'UZUM',
+                                'date': self.init_time,
+                                'data': [data_list] if len(data_list) == 1 else data_list
+                            }
+                            try:
+                                send_message_broker(data_to_send, host=self.broker_host, port=self.broker_port)
+                            except Exception as e:
+                                self.logger.error(f"Failed to send to Broker: {e}")
+                        data_list = []
+                        self.logger.debug(f'Processed {ind} products.')
 
-                            data_list = []
-                            if failed_product_ids:
-                                self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
-                                if save_data:
-                                    save_data_to(failed_product_ids, 'failed_product_ids')
+                except Exception as e:
+                    self.logger.error(f'Failed to receive data from an API for product ID {p_ids[ind]}: {e}')
+                    if self.status >= 30:  # Proxy error
                         break
-                    wait_with_backoff(request_attempts=request_attempts, backoff_factor=backoff_factor)
-                    conn, current_proxy_ip = make_connection()
+                    self.request_attempts += 1
+                    if self.request_attempts > self.request_retries:
+                        self.logger.error(f'Exceeded max number of {self.request_retries} retries!')
+                        break
+                    self.wait_with_backoff()
+                    self.make_connection(host, pm_timeout=self.current_pm_timeout)
                     continue
         except Exception as e:
             self.logger.error(f'Error while fetching products: {e}')
-            status = 1
+            self.status = 1
         finally:
             if self.proxy_manager and self.shut_down_proxy_scheduler:
                 self.logger.debug(f"In {__file__}: Closing proxy_manager scheduler.")
                 self.proxy_manager.shutdown_scheduler()
-            if conn is not None:
-                conn.close()
+            if self.conn is not None:
+                self.conn.close()
 
         if data_list:
             self.logger.info(f'Finished processing {ind} products.')
@@ -650,11 +684,12 @@ class ProductFetcher:
             if send_to_db:
                 data_to_send = {
                     'platform': 'UZUM',
+                    'date': self.init_time,
                     'data': [data_list] if len(data_list) == 1 else data_list
                 }
                 # Optionally, send data to DB or other services
                 try:
-                    send_message(data_to_send, host=self.broker_host, port=self.broker_port)
+                    send_message_broker(data_to_send, host=self.broker_host, port=self.broker_port)
                 except Exception as e:
                     self.logger.error(f"Failed to send to Broker: {e}")
             if save_data:
@@ -668,37 +703,124 @@ class ProductFetcher:
             self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
             if save_data:
                 save_data_to(failed_product_ids, 'failed_product_ids')
-        if ind < len(p_ids):
+        if ind < len(p_ids) and self.status <= 20:
             self.logger.warning(f'Total products processed for current try is {ind} out of {len(p_ids)}')
-            status = 2
-
-        end_time = time.time()
-        self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")
+            self.status = 20
 
         # return total_data_list, failed_product_ids, status
-        return status, ind
+        return ind
 
-    def run(self, p_ids: List[int], ind: int = 0, save_data: bool = False, send_data=True) -> Tuple[int, int]:
+    def fetch_imgs_with_graphql(self) -> Optional[List[Dict[str, Any]]]:
         """
-        Start the product fetching and parsing process.
+        Fetch product images using a GraphQL query.
 
         Args:
-            p_ids (List[int]): List of product IDs to fetch.
+            product_id (int): The ID of the product to fetch images for.
 
         Returns:
-            Tuple[List[Dict[str, Any]], List[int], int]:
-                A tuple containing status code and last processed index in the list of products.
+            Optional[List[Dict[str, Any]]]: A list of photos with their URLs, or None if an error occurred.
         """
-        self.logger.info("Starting to fetch and parse products")
-        try:
-            self.logger.info(f"Starting to fetch products from index {ind}.")
-            return self.fetch_products(p_ids, ind=ind, save_data=save_data, send_to_db=send_data)
-        except Exception as e:
-            self.logger.error(f"In {__file__}->main: {e}")
-            # return status, ind
-            return 1, 0
 
-    def load_ids(self, file_name: str = "", ind: int = 0, run_ids_fetcher: bool = True) -> Optional[List[int]]:
+        graphql_query = """
+        query ProductPhotos($productId: Int!) {
+            productPage(id: $productId) {
+                product {
+                    photos {
+                        key
+                        link(trans: PRODUCT_720) {
+                            high
+                            low
+                        }
+                    }
+                }
+            }
+        }
+        """
+
+        host = self.graphql_url.split('//')[1].split('/')[0]
+        endpoint = '/'
+
+        headers: Dict[str, str] = {
+            'Accept': '*/*',
+            'Accept-Language': 'ru-RU',
+            'apollographql-client-name': 'web-customers',
+            'apollographql-client-version': '1.25.2',
+            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
+            'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
+            'Content-Type': 'application/json',
+            'Origin': self.main_url,
+            'Priority': 'u=1, i',
+            'Referer': self.main_url,
+            'sec-fetch-site': 'same-site',
+            'sentry-trace': str(uuid.uuid4()),
+            'User-Agent': self.ua.random,
+            'x-iid': str(uuid.uuid4())
+        }
+        ind = 0
+        self.request_attempts = 0
+        count = 0
+        self.current_pm_timeout = self.proxy_manager_timeout
+        self.proxy_ind = 0
+        try:
+            while ind < len(self.no_img_ids):
+                if self.request_attempts > self.request_retries:
+                    self.logger.error(f'Exceeded max number of {self.request_retries} retries during fetching GraphQL image URLs!')
+                    break
+
+                if self.proxy_ind % self.batch_size == 0:
+                    self.make_connection(host, pm_timeout=self.current_pm_timeout)
+                if self.conn is None:
+                    raise ConnectionError("Failed to establish a connection to the server for a GraphQL query.")
+
+                product_id = self.no_img_ids[ind]
+                variables = {
+                    "productId": product_id
+                }
+
+                payload = json.dumps({
+                    "query": graphql_query,
+                    "variables": variables
+                })
+
+                self.conn.request("POST", endpoint, body=payload, headers=headers)
+                response = self.conn.getresponse()
+
+                json_data, response_errors = self.process_response(response, host)
+                if response_errors:
+                    continue
+
+                # Parse the response
+                photos = json_data.get("data", {}).get("productPage", {}).get("product", {}).get("photos", [])
+
+                if not photos:
+                    self.logger.warning(f"No image URLs found for product ID {product_id}.")
+
+                elif len(photos) > 0:
+                    img_url = photos[0].get("link", {}).get("low")
+                    if img_url is None:
+                        img_url = photos[0].get("link", {}).get("high")
+                    if img_url is not None:
+                        self.send_img_obj_to_broker(img_url, product_id)
+                    else:
+                        self.logger.warning(f"No image URL found for product ID {product_id}.")
+                    count += 1
+
+                ind += 1
+                self.proxy_ind += 1
+                self.current_pm_timeout = self.proxy_manager_timeout
+
+        except Exception as e:
+            self.logger.error(f"Error during GraphQL request for product ID {self.no_img_ids[ind]}: {e}")
+            return None
+        finally:
+            if self.conn:
+                self.conn.close()
+        if count > 0:
+            self.logger.info(f"Successfully fetched {count} image URLs of total {len(self.no_img_ids)} products with GraphQL queries.")
+        else:
+            self.logger.warning(f"Failed to fetch image URLs for {len(self.no_img_ids)} products with GraphQL queries.")
+
+    def load_ids(self, file_name: str = "", ind: int = 0, run_ids_fetcher: bool = True) -> Optional[Tuple[List[int], int]]:
         """
         Load product IDs from a specified file starting from a given index.
 
@@ -708,40 +830,137 @@ class ProductFetcher:
 
         Returns:
             Optional[List[int]]: A list of product IDs or None if loading fails.
+            Status: 0 if success
         """
         product_list = load_last_saved_json(directory=f'{self.data_dir}/{self.product_ids_dir}', file_name=file_name)
         if product_list:
             # return product_list[ind:]
             self.logger.info(f"Loaded {len(product_list)} product IDs for fetching.")
-            return product_list
+            return product_list, 0
         elif run_ids_fetcher:
             self.logger.info("IDs not found in local storage. Running IdsFetcher.")
             try:
-                ids_fetcher = IdsFetcher()
+                ids_fetcher = IdsFetcher(proxy_manager=self.proxy_manager, token_manager=self.token_manager, init_time=self.init_time)
                 categories = ids_fetcher.load_categories()
                 if categories:
-                    product_list = ids_fetcher.fetch_product_ids_by_categories(categories=categories)
-                    return product_list
+                    self.logger.debug(f"Categories loaded by IdsFetcher.")
+                    product_list, status = ids_fetcher.fetch_product_ids_by_categories(categories=categories)
+                    return product_list, status
+                else:
+                    self.logger.error(f"Failed to load categories for product parsing.")
             except Exception as e:
                 self.logger.error(f"While running IdsFetcher: {e}")
 
         self.logger.error(f"No product IDs found in {self.data_dir}/{self.product_ids_dir}. Try running first 'IdsFetcher'")
         return None
 
-    def get_ids_from_category(self, category_id: int) -> List[int]:
+    def send_status_to_redis(self, current_status: str, total_products: int, processed_products: int = 0, time: float = 0) -> None:
+        error_message = ""
+        if self.status == 1:
+            error_message = "Unknown error"
+        elif self.status == 20:
+            error_message = "Server error"
+        elif self.status == 30:
+            error_message = "Proxies are expired"
+        elif self.status == 31:
+            error_message = "Proxies are unavailable"
+        elif self.status == 32:
+            error_message = "Unknown proxy error"
+        message = {
+            "parsing_id": self.id,
+            "parsing_date": self.init_time,
+            "status": current_status,
+            "error_message": error_message,
+            "total_products": total_products,
+            "processed": processed_products,
+            "time_elapsed": f"{time} seconds"
+        }
+        if send_message_redis("parsing_status", json.dumps(message)):
+            self.logger.info("Status message successfully sent to Redis")
+        else:
+            self.logger.error("Failed to send status message to Redis!")
+
+    def run(self, p_ids: List[int] = [], ind: int = 0, retries: int = 5, save_data: bool = False, send_data=True) -> Tuple[int, int]:
+        """
+        Start the product fetching and parsing process.
+
+        Args:
+            p_ids (List[int]): List of product IDs to fetch.
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[int], int]:
+                A tuple containing status code and last processed index in the list of products.
+                    - Status code: 0 success, 1 failure, 2 partial success (connection error).
+        """
+        self.logger.info("Starting to fetch and parse products")
+        start_time = time.time()
+
+        if p_ids == []:
+            p_ids = self.load_ids()
+        if send_data:
+            self.logger.info(f"Sending status to redis")
+
+        if self.status == 0:
+            current_status = "process"
+        else:
+            current_status = "failed"
+        self.send_status_to_redis(current_status, len(p_ids))
+
+        attempt = 0
+        while attempt < retries and self.status < 30:
+            try:
+                self.logger.info(f"Attempt {attempt}: starting to fetch products from index {ind}.")
+                attempt += 1
+                ind = self.fetch_products(p_ids, ind=ind, save_data=save_data, send_to_db=send_data)
+                if self.status == 0:
+                    self.logger.info(f"Successfully fetched all products.")
+                    break
+                elif self.status >= 30:
+                    self.logger.error(f"Closing product fetcher due to proxy error.")
+                    break
+                else:
+                    self.logger.warning(f"Failed tp finish fetching all products. Return status: {status}")
+                    self.logger.warning(f"Failed to fetch {len(p_ids[ind:])} of {len(p_ids)} products.")
+                    if attempt < retries:
+                        self.wait_with_backoff(backoff_factor=1, request_attempts=attempt, msg="Failed to fetch all products.")
+                        self.logger.info(f"Retrying: attempt number {attempt} of {retries}...")
+                    else:
+                        self.logger.error(f"Failed to fetch all products after {retries} attempts.")
+            except Exception as e:
+                self.logger.error(f"In {__file__}->main: {e}")
+                self.status = 1
+        # Add code for a GraphQL query
+        if self.status == 0 and len(self.no_img_ids) > 0 and send_data:
+            self.logger.info(f"Products without image URLs count: {len(self.no_img_ids)} of total {ind} products")
+            self.logger.info("Starting to fetch using GraphQL queries...")
+            self.fetch_imgs_with_graphql()
+
+        end_time = time.time()
+        self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")
+        if self.status == 0:
+            current_status = "completed"
+        else:
+            current_status = "failed"
+        self.send_status_to_redis(current_status, len(p_ids), ind, (end_time - start_time))
+        return self.status, ind
+
+    def get_ids_from_category(self, category_id: int) -> Tuple[List[int], int]:
         """
         Fetch product IDs from the given category ID.
 
         Args:
-            category_id (int): The
+            category_id (int): The ID of the category to fetch product IDs from.
+
+        Returns:
+            List[int]: A list of product IDs fetched from the specified category. If an error occurs, an empty list is returned.
         """
         try:
             self.logger.info(f"Initiating IdsFetcher to fetch product IDs from category {category_id}")
-            ids_fetcher = IdsFetcher(proxy_manager=self.proxy_manager, token_manager=self.token_manager)
+            ids_fetcher = IdsFetcher(proxy_manager=self.proxy_manager, token_manager=self.token_manager, init_time=self.init_time)
             return ids_fetcher.fetch_product_ids_by_categories(category_id, save_data=False)
         except Exception as e:
             self.logger.error(f"While fetching product IDs from category {category_id}: {e}")
-            return []
+            return [], 1
 
 
 if __name__ == "__main__":
@@ -767,13 +986,17 @@ if __name__ == "__main__":
             product_fetcher.logger.info(f"Loading IDs data from file: {file_name}")
         else:
             product_fetcher.logger.info(f"Loading the last saved IDs from: {product_fetcher.data_dir}/product_ids")
-        loaded_ids = product_fetcher.load_ids(file_name)
+        loaded_ids, status = product_fetcher.load_ids(file_name)
+        if status != 30:
+            product_fetcher.status = status
         # loaded_ids = product_fetcher.load_ids(file_name, args.index if args.index else 0)
         if loaded_ids:
             product_list = loaded_ids
     elif args.categories:
         product_fetcher.logger.info(f"Fetching product IDs from category(s) {args.categories}")
-        product_list = product_fetcher.get_ids_from_category(args.categories)
+        product_list, status = product_fetcher.get_ids_from_category(args.categories)
+        if status >= 30:
+            product_fetcher.status = status
     elif args.product_ids:
         product_fetcher.logger.info(f'Parsing product with ID(s): {args.product_ids}')
         product_list = args.product_ids

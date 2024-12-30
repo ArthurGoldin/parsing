@@ -7,7 +7,10 @@ import logging
 import logging.config
 import configparser
 import os
+import redis
 
+# Create Redis client instance
+redis_client = redis.StrictRedis(host='redis', port=6379, db=0)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -29,7 +32,7 @@ broker_host = config.get('broker', 'host')
 broker_port = config.get('broker', 'port')
 
 
-def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port, queue_name="uzum_products"):
+def send_message_broker(message, retries=5, delay=1, host=broker_host, port=broker_port, queue_name="uzum_products"):
     """
     Send a message to RabbitMQ with retries if the server is unavailable.
 
@@ -68,6 +71,18 @@ def send_message(message, retries=5, delay=1, host=broker_host, port=broker_port
     return True
 
 
+def send_message_redis(key, value) -> bool:
+    """
+    Send parsing status to Redis
+    """
+    try:
+        redis_client.set(key, value)
+        return True
+    except Exception as e:
+        logger.error(f"Error while sending to Redis: {e}")
+        return False
+
+
 def run_default(path="", name="", host=broker_host, port=broker_port):
     message = None
     if path and name:
@@ -80,7 +95,7 @@ def run_default(path="", name="", host=broker_host, port=broker_port):
             "platform": "DEFAULT",
             "data": "DEFAULT"
         }
-    return send_message(message, host=host, port=port)
+    return send_message_broker(message, host=host, port=port)
 
 
 if __name__ == '__main__':

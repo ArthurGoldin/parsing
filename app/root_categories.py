@@ -14,8 +14,8 @@ import sys
 from typing import List, Dict, Any, Tuple, Optional
 from fake_useragent import UserAgent
 from save_and_load_data import save_to_file, load_last_saved_json, load_json
-from proxy_manager import ProxyManager
-from send_data_to_db import send_message
+from proxy_manager import ProxyManager, ProxyUnavailableError
+from send_data_to_db import send_message_broker
 from token_manager import TokenManager
 
 # Define current directory and configuration paths
@@ -216,6 +216,9 @@ def get_category_tree(
                 logger.info(f"Collected category tree from {main_url} with Accept-Language: {headers['Accept-Language']}")
             else:
                 raise ValueError(f"HTTP error occurred while fetching category tree from GraphQL: Status code {response.status}")
+            break
+        except ProxyUnavailableError as e:
+            logger.error(f"Proxy error: {e}")
             break
         except Exception as e:
             logger.error(f"Attempt {request_attempts + 1} failed: {e}")
@@ -545,6 +548,9 @@ def get_root_categories(
                     else:
                         root_categories = rc
             break
+        except ProxyUnavailableError as e:
+            logger.error(f"Proxy error: {e}")
+            break
         except Exception as e:
             logger.error(f"Attempt {request_attempts + 1} failed: {e}")
             request_attempts += 1
@@ -569,7 +575,7 @@ def get_root_categories(
     else:
         if send_to_broker:
             try:
-                send_message(root_categories, host=broker_host, port=broker_port, queue_name='uzum_categories')
+                send_message_broker(root_categories, host=broker_host, port=broker_port, queue_name='uzum_categories')
             except Exception as e:
                 logger.error(f'Failed sending message to RabbitMQ broker: {e}')
         if save_data:
@@ -645,7 +651,7 @@ def get_all_root_categories(
 
         if send_to_broker:
             try:
-                send_message(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
+                send_message_broker(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
             except Exception as e:
                 logger.error(f'Failed sending message to RabbitMQ broker: {e}')
 

@@ -514,8 +514,8 @@ class ProxyManager:
         # Validate expiration time
         exp = proxy_dict["exp"]
         if not isinstance(exp, (int, float)) or exp <= time.time():
-            logger.error(f"Validation Error: Invalid or past 'exp' timestamp '{exp}' in proxy data: {dict_filtered}")
-            return False
+            logger.warning(f"Validation Warning: Invalid or past 'exp' timestamp '{exp}' in proxy data: {dict_filtered}. Setting to EXPIRED")
+            proxy_dict["status"] = ProxyStatus.EXPIRED.value
 
         # Validate status
         status_str = proxy_dict["status"].upper()
@@ -541,12 +541,20 @@ class ProxyManager:
             logger.error("Proxy connection failed.")
             return False
 
-    def check_expired_proxies(self):
+    def check_expired_proxies(self) -> bool:
+        """
+            Checks for expired proxies and updates their status.
+            Returns True if all proxies are expired, False otherwise.
+        """
         with self._manager_lock:
+            exp_flag = True
             for proxy in self.proxies:
                 if proxy.is_expired():
                     logger.info(f"Proxy {proxy.ip} has expired and is now set to EXPIRED.")
                     self.proxy_available.notify_all()
+                else:
+                    exp_flag = False
+            return exp_flag
 
     def add_proxy(self, proxy: Proxy) -> None:
         """
@@ -770,12 +778,16 @@ class ProxyManager:
                 logger.debug(f"Selected active proxy: {selected_proxy.ip}")
                 return selected_proxy
 
+            if self.check_expired_proxies():
+                logger.error("All proxies are expired! No proxies available.")
+                raise ProxyUnavailableError("Expired: All proxies are expired.")
+
             # Check for sleeping proxies
             sleeping_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.SLEEPING]
+            paused_proxies = [proxy for proxy in self.proxies if proxy.status == ProxyStatus.PAUSED]
 
-            if not sleeping_proxies:
-                self.check_expired_proxies()
-                logger.warning("No active or sleeping proxies available raising an error.")
+            if not sleeping_proxies and not paused_proxies:
+                logger.warning("No active, sleeping or paused proxies available raising an error.")
                 raise ProxyUnavailableError()
 
             # Calculate remaining time if timeout is set
@@ -791,7 +803,7 @@ class ProxyManager:
                     )
 
             else:
-                remaining_time = 3600  # wait at most 100 seconds
+                remaining_time = 3600  # wait at most  seconds
 
             logger.info("No active proxies. Waiting for a sleeping proxy to become active...")
 
