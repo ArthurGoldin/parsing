@@ -181,13 +181,6 @@ def get_category_tree(
     category_tree = None
     request_attempts = 0
 
-    # if use_direct_connection:
-    #     proxy_manager = None
-    # else:
-    #     if proxy_manager is None:
-    #         proxy_manager = ProxyManager.from_json_file(proxy_dir)
-    #         proxy_close = True
-
     while request_attempts <= request_retries:
         try:
             if use_direct_connection:

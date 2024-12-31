@@ -1,6 +1,5 @@
 import argparse
 import configparser
-import token
 import brotli
 import zlib
 import logging.config
@@ -9,6 +8,7 @@ import time
 import uuid
 import http.client
 import os
+from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
 from token_manager import TokenManager
 from fake_useragent import UserAgent

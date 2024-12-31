@@ -119,6 +119,9 @@ def run_system_check(host_name=broker_host, port=broker_port):
 
     token_manager = None
     proxy_manager = None
+    p_ids = None
+    leaf_categories = None
+    rc = None
     try:
         proxy_manager = ProxyManager().from_json_file(proxy_dir)
         try:
@@ -148,7 +151,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
 
         try:
             logger.info('Checking category tree request with GraphQl...')
-            ct = root_categories.get_category_tree(token_manager=token_manager, save_data=False)
+            ct = root_categories.get_category_tree(proxy_manager=proxy_manager, token_manager=token_manager, save_data=False)
             if ct is None:
                 res_stats["root_categories(GraphQL request)"] = "FAILED"
             else:
@@ -172,8 +175,8 @@ def run_system_check(host_name=broker_host, port=broker_port):
 
         try:
             logger.info('Checking product_ids...')
-            product_ids = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
-            p_ids = product_ids.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else 10, save_data=False)  # change to other default category ID if necessary
+            ids_fetcher = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
+            p_ids, _ = ids_fetcher.fetch_product_ids_by_categories([leaf_categories[1]] if leaf_categories else 10, save_data=False)  # change to other default category ID if necessary
             if p_ids is None:
                 res_stats["product_ids"] = "FAILED"
             else:
@@ -185,13 +188,9 @@ def run_system_check(host_name=broker_host, port=broker_port):
 
         try:
             logger.info('Checking product_parser...')
-            product_parser = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
+            product_fetcher = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
             # products, failed, status = product_parser.fetch_products([p_ids[0]] if p_ids else [1106551], save_data=False)  # change to other default product ID if necessary
-            status, _ = product_parser.fetch_products(
-                [p_ids[0]] if p_ids else [1106551],
-                save_data=False,
-                send_to_db=False
-            )
+            status, _ = product_fetcher.run([p_ids[0]] if p_ids else [1106551], save_data=False, send_data=False)
             if status != 0:
                 res_stats["product_parser"] = "FAILED"
             else:
@@ -201,17 +200,6 @@ def run_system_check(host_name=broker_host, port=broker_port):
             res_stats["product_parser"] = "ERROR"
             logger.error(f"Error in product_parser: {e}")
 
-        # try:
-        #     logger.info('Checking RabbitMQ messaging...')
-        #     message_send_res = send_data_to_db.run_default('configs', def_pr_name, host=host_name, port=port)
-        #     if not message_send_res:
-        #         res_stats["send_message"] = "FAILED"
-        #     else:
-        #         res_stats["send_message"] = "PASSED"
-        #     logger.info(f'send_message: {res_stats["send_message"]}')
-        # except Exception as e:
-        #     res_stats["send_message"] = "ERROR"
-        #     logger.error(f"Error in send_message: {e}")
     except Exception as e:
         logger.error(f"System check: {e}")
     finally:

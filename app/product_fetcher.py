@@ -900,11 +900,11 @@ class ProductFetcher:
         if send_data:
             self.logger.info(f"Sending status to redis")
 
-        if self.status == 0:
-            current_status = "process"
-        else:
-            current_status = "failed"
-        self.send_status_to_redis(current_status, len(p_ids))
+            if self.status == 0:
+                current_status = "process"
+            else:
+                current_status = "failed"
+            self.send_status_to_redis(current_status, len(p_ids))
 
         attempt = 0
         while attempt < retries and self.status < 30:
@@ -937,11 +937,13 @@ class ProductFetcher:
 
         end_time = time.time()
         self.logger.info(f"Product parser executing time: {end_time - start_time:.2f} seconds")
-        if self.status == 0:
-            current_status = "completed"
-        else:
-            current_status = "failed"
-        self.send_status_to_redis(current_status, len(p_ids), ind, (end_time - start_time))
+        if send_data:
+            if self.status == 0:
+                current_status = "completed"
+            else:
+                current_status = "failed"
+            self.send_status_to_redis(current_status, len(p_ids), ind, (end_time - start_time))
+
         return self.status, ind
 
     def get_ids_from_category(self, category_id: int) -> Tuple[List[int], int]:
