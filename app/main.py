@@ -4,7 +4,7 @@ import os
 import time
 import logging
 import logging.config
-
+import argparse
 import sys
 from typing import List, Any
 
@@ -56,7 +56,7 @@ if not os.path.exists(data_dir):
     os.makedirs(data_dir)
 
 
-def fetch_data() -> None:
+def fetch_data(save_data: bool = False, send_data=True) -> None:
     """
     Fetch data from the API and handle errors, retries, and backoff.
 
@@ -70,7 +70,7 @@ def fetch_data() -> None:
         proxy_manager = ProxyManager().from_json_file(proxy_dir)
         token_manager = TokenManager(proxy_manager=proxy_manager)
 
-        rc, rc_s = root_categories.get_all_root_categories(proxy_manager=proxy_manager, token_manager=token_manager)
+        rc, rc_s = root_categories.get_all_root_categories(proxy_manager=proxy_manager, token_manager=token_manager, send_to_broker=send_data)
         if rc is None or rc_s is None:
             raise FileNotFoundError("Failed to load root-categories.")
 
@@ -79,10 +79,12 @@ def fetch_data() -> None:
         if not lc:
             raise AttributeError("Leaf categories not found")
 
-        logger.info("Retrieving IDs...")
+        # lc = load_last_saved_json('data/category_ids/')
 
+        logger.info(f"Loaded {len(lc)} category IDs.")
+        logger.info("Retrieving product IDs...")
         ids_fetcher = IdsFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
-        p_ids = ids_fetcher.run(lc)
+        p_ids, _ = ids_fetcher.run(lc, save_data=save_data)
         if p_ids is None:
             raise FileNotFoundError("Failed to retrieve product IDs.")
         # p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
@@ -98,7 +100,7 @@ def fetch_data() -> None:
         product_fetcher = ProductFetcher(proxy_manager=proxy_manager, token_manager=token_manager)
         while (product_fetcher_counter < max_prd_fetching_retries):
             product_fetcher_counter += 1
-            status, ind = product_fetcher.run(p_ids, ind=ind)
+            status, ind = product_fetcher.run(p_ids, ind=ind, save_data=save_data, send_data=send_data)
 
             if status == 0:
                 logger.info(f"Successfully fetched {ind} products.")
@@ -121,8 +123,21 @@ def fetch_data() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Consequently run all parsing modules.')
+    parser.add_argument('-s', '--save', action='store_true', help='Save data to local storage.')
+    parser.add_argument('-d', '--disableBroker', action='store_false', help='Define whether to send data to broker.')
+    args = parser.parse_args()
+
+    if args.save:
+        logger.info(f"Fetched data will be stored.")
+    else:
+        logger.info("Data storage is disabled.")
+    if args.disableBroker:
+        logger.info(f"Sending data to broker is enabled")
+    else:
+        logger.info("Sending data to broker is disabled.")
+
     try:
-        pass
-        fetch_data()
+        fetch_data(save_data=args.save, send_data=args.disableBroker)
     except Exception as e:
         logger.error(f"In {sys.argv[0]}->main: {e}")

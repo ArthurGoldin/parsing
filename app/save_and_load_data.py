@@ -21,13 +21,13 @@ except Exception as e:
     logger = logging.getLogger()
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
-data_def = os.path.join(current_dir, 'data')
+data_default_dir = os.path.join(current_dir, 'data')
 
 
 def save_to_file(file: Union[List[Any], Dict[str, Any]],
                  file_name: str,
                  sub_dir: str = "",
-                 data_dir: str = data_def,
+                 data_dir: str = data_default_dir,
                  file_type: str = "",
                  add_date_time: bool = True,
                  separate_folder: bool = False,
@@ -102,7 +102,7 @@ def save_html_to_file(html: str, filename: str) -> None:
         logger.info(f"Saved {filename} to data dir.")
 
 
-def load_last_saved_csv(directory: str = data_def, file_name: str = "") -> List[int]:
+def load_last_saved_csv(directory: str = data_default_dir, file_name: str = "") -> List[int]:
     """
     Load the last saved CSV file from the specified directory.
 
@@ -139,7 +139,7 @@ def load_last_saved_csv(directory: str = data_def, file_name: str = "") -> List[
         return None
 
 
-def load_last_saved_json(directory: str = data_def, file_name: str = "") -> List:
+def load_last_saved_json(directory: str = data_default_dir, file_name: str = "") -> List:
     """
     Load the last saved JSON file from the specified directory.
 
@@ -195,7 +195,7 @@ def load_json(file_path: str) -> Dict[str, Any]:
     return None
 
 
-def load_last_saved_root_categories(directory: str = f"{data_def}/root_categories") -> Dict[str, Any]:
+def load_last_saved_root_categories(directory: str = f"{data_default_dir}/root_categories") -> Dict[str, Any]:
     """
     Load the last saved root categories JSON file from the specified directory.
 

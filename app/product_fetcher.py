@@ -137,9 +137,7 @@ class ProductFetcher:
 
         self.no_img_ids: List[int] = []
 
-        self.brands_by_category = load_last_saved_json(
-            f'{self.data_dir}/{self.config.get("storage", "brands_sub_dir")}'
-        )
+        self.brands_by_category = load_last_saved_json(f'{self.data_dir}/{self.config.get("storage", "brands_sub_dir")}')
 
         # Managers
         self.proxy_manager: Optional[ProxyManager] = proxy_manager
@@ -439,9 +437,11 @@ class ProductFetcher:
             except ProxyUnavailableError as e:
                 self.logger.error(f"Proxy error: {e}")
                 if "expired" in str(e).lower():
-                    self.status = 30  # Proxies are expired
+                    self.status = 30
+                    self.logger.error("Proxies have expired.")  # Proxies are expired
                 else:
                     self.status = 31  # Proxies are unavailable
+                    self.logger.error("Proxies are unavailable.")
                 self.conn = None
                 self.current_proxy_ip = None
             except Exception:
@@ -586,6 +586,7 @@ class ProductFetcher:
             if save_data:
                 data_to_save = {
                     'platform': 'UZUM',
+                    'date': self.init_time,
                     'data': data_list
                 }
                 if file_name is None:
@@ -888,9 +889,9 @@ class ProductFetcher:
             p_ids (List[int]): List of product IDs to fetch.
 
         Returns:
-            Tuple[List[Dict[str, Any]], List[int], int]:
-                A tuple containing status code and last processed index in the list of products.
-                    - Status code: 0 success, 1 failure, 2 partial success (connection error).
+            Tuple[FetcherStatus, int]:
+                - FetcherStatus: Enum indicating the final status.
+                - int: Last processed index in the product list.
         """
         self.logger.info("Starting to fetch and parse products")
         start_time = time.time()
@@ -919,7 +920,7 @@ class ProductFetcher:
                     self.logger.error(f"Closing product fetcher due to proxy error.")
                     break
                 else:
-                    self.logger.warning(f"Failed tp finish fetching all products. Return status: {status}")
+                    self.logger.warning(f"Failed tp finish fetching all products. Return status: {self.status}")
                     self.logger.warning(f"Failed to fetch {len(p_ids[ind:])} of {len(p_ids)} products.")
                     if attempt < retries:
                         self.wait_with_backoff(backoff_factor=1, request_attempts=attempt, msg="Failed to fetch all products.")

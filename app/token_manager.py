@@ -120,6 +120,7 @@ class TokenManager:
 
     def validate_token(self, token):
         """Validate the format of the token."""
+        logger.debug("Validating token...")
         pattern = re.compile(r'^[A-Za-z0-9\-_\.]+$')  # Adjust based on token format
         return bool(pattern.match(token))
 

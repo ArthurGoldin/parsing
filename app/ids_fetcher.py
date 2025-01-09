@@ -533,12 +533,12 @@ class IdsFetcher:
                         else:
                             done = True
 
-                        prev_data = data
-                        self.request_attempts = 0
-                        self.current_pm_timeout = self.proxy_manager_timeout
-                        # ind += 1
-                        self.proxy_ind += 1
-                        self.request_counter += 1
+                    prev_data = data
+                    self.request_attempts = 0
+                    self.current_pm_timeout = self.proxy_manager_timeout
+                    # ind += 1
+                    self.proxy_ind += 1
+                    self.request_counter += 1
 
                 except Exception as e:
                     self.logger.error(f'Failed to receive data from a GraphQL query: {e}')
@@ -656,10 +656,10 @@ class IdsFetcher:
         end_time = time.time()
         self.logger.info(f"Product ID's fetching execution time: {end_time - start_time:.2f} seconds")
         if len(p_ids) == 0:
-            return None
+            return [], 1
         return p_ids, self.status
 
-    def run(self, categories: Any, **kwargs: Any) -> List[int]:
+    def run(self, categories: Any, save_data: bool = False, **kwargs: Any) -> Tuple[List[int], int]:
         """
         Start the product ID fetching process for the given categories.
 
@@ -671,13 +671,14 @@ class IdsFetcher:
 
         Returns:
             List[int]: List of fetched product IDs.
+            Status: status
         """
         self.logger.info(f"Starting to fetch product IDs for the input categories. Total categories: {len(categories)}.")
         try:
-            return self.fetch_product_ids_by_categories(categories, **kwargs)
+            return self.fetch_product_ids_by_categories(categories, save_data=save_data, **kwargs)
         except Exception as e:
             self.logger.error(f"In {__file__}->run: {e}")
-            return []
+            return [], 1
 
     def load_categories(self, file_name: str = "", ind: int = 0, run_root_categories: bool = True) -> Optional[List[Dict[str, Any]]]:
         """
