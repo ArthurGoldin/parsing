@@ -163,12 +163,12 @@ def get_category_tree(
         'Accept-Language': 'ru-RU',
         'apollographql-client-name': 'web-customers',
         'apollographql-client-version': '1.25.2',
-        'Authorization': f'Bearer {auth_token}',
+        'Authorization': f"Bearer {auth_token}",
         'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
         'Content-Type': 'application/json',
-        'Origin': f'{main_url}',
+        'Origin': f"{main_url}",
         'Priority': 'u=1, i',
-        'Referer': f'{main_url}',
+        'Referer': f"{main_url}",
         'sec-fetch-site': 'same-site',
         'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
         'User-Agent': ua.random,
@@ -238,7 +238,7 @@ def get_category_tree(
         try:
             save_to_file(category_tree, ct_dir, ct_dir, add_date_time=False, separate_folder=False)
         except Exception as e:
-            logger.error(f'Error in get_category_tree: {e}')
+            logger.error(f"Error in get_category_tree: {e}")
     return category_tree
 
 
@@ -357,16 +357,16 @@ def find_leaf_categories(
             try:
                 save_to_file(leaf_categories, 'leaf_categories', lc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
-                logger.error(f'Error in find_leaf_categories: {e}')
+                logger.error(f"Error in find_leaf_categories: {e}")
     return leaf_categories
 
 
-def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> Optional[Dict[str, Any]]:
+def load_last_saved_root_categories(directory: str = f"{data_dir}/{rc_dir}") -> Optional[Dict[str, Any]]:
     """
     Load the last saved root categories JSON file from the specified directory.
 
     Args:
-        directory (str, optional): The directory containing the JSON files. Defaults to f'{data_dir}/{rc_dir}'.
+        directory (str, optional): The directory containing the JSON files. Defaults to f"{data_dir}/{rc_dir}".
 
     Returns:
         Optional[Dict[str, Any]]: The root categories data if successful, else None.
@@ -381,11 +381,11 @@ def load_last_saved_root_categories(directory: str = f'{data_dir}/{rc_dir}') -> 
         with open(latest_file, 'r', encoding='utf-8') as file:
             root_categories = json.load(file)
 
-        logger.info(f'Loaded root categories from {latest_file}')
+        logger.info(f"Loaded root categories from {latest_file}")
         return root_categories
 
     except Exception as e:
-        logger.error(f'Failed to load the last saved root categories: {e}')
+        logger.error(f"Failed to load the last saved root categories: {e}")
         return None
 
 
@@ -537,7 +537,7 @@ def get_root_categories(
                         try:
                             add_title_uz(root_categories['payload'], rc['payload'])
                         except Exception as e:
-                            logger.error(f'Error while merging titles: {e}')
+                            logger.error(f"Error while merging titles: {e}")
                     else:
                         root_categories = rc
             break
@@ -570,12 +570,12 @@ def get_root_categories(
             try:
                 send_message_broker(root_categories, host=broker_host, port=broker_port, queue_name='uzum_categories')
             except Exception as e:
-                logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+                logger.error(f"Failed sending message to RabbitMQ broker: {e}")
         if save_data:
             try:
                 save_to_file(root_categories, rc_dir, rc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
-                logger.error(f'Error in get_root_categories: {e}')
+                logger.error(f"Error in get_root_categories: {e}")
     return root_categories
 
 
@@ -646,13 +646,13 @@ def get_all_root_categories(
             try:
                 send_message_broker(rc, host=broker_host, port=broker_port, queue_name='uzum_categories')
             except Exception as e:
-                logger.error(f'Failed sending message to RabbitMQ broker: {e}')
+                logger.error(f"Failed sending message to RabbitMQ broker: {e}")
 
         if save_data:
             try:
                 save_to_file(rc, f"{rc_dir}_extnd", rc_dir, add_date_time=True, separate_folder=False)
             except Exception as e:
-                logger.error(f'Error in get_all_root_categories: {e}')
+                logger.error(f"Error in get_all_root_categories: {e}")
     except Exception as e:
         logger.error(f"Error in get_all_root_categories: {e}")
     finally:

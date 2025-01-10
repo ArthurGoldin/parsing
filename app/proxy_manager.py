@@ -838,7 +838,7 @@ class ProxyManager:
                 conn = http.client.HTTPSConnection(proxy.ip, proxy.ports['https'])
                 if host:
                     # Set up a tunnel to the target host using the CONNECT method
-                    conn.set_tunnel(host, headers={'Proxy-Authorization': f'Basic {encoded_credentials}'})
+                    conn.set_tunnel(host, headers={'Proxy-Authorization': f"Basic {encoded_credentials}"})
                     logger.debug(f"Connection to {host} established through proxy {proxy.ip}:{proxy.ports['https']}")
                 else:
                     logger.debug(f"Connection to proxy established {proxy.ip}:{proxy.ports['https']}")

@@ -137,7 +137,7 @@ class ProductFetcher:
 
         self.no_img_ids: List[int] = []
 
-        self.brands_by_category = load_last_saved_json(f'{self.data_dir}/{self.config.get("storage", "brands_sub_dir")}')
+        self.brands_by_category = load_last_saved_json(f"{self.data_dir}/{self.config.get('storage', 'brands_sub_dir')}")
 
         # Managers
         self.proxy_manager: Optional[ProxyManager] = proxy_manager
@@ -148,14 +148,14 @@ class ProductFetcher:
         self.ua = UserAgent()
 
         self.headers: Dict[str, str] = {
-            'authority': f'{self.product_api_url.split("//")[1].split("/")[0]}',
+            'authority': f"{self.product_api_url.split('//')[1].split('/')[0]}",
             'method': 'GET',
-            'path': f'{self.product_api_url.split("https://" + self.product_api_url.split("//")[1].split("/")[0])[1]}',
+            'path': f"{self.product_api_url.split('https://' + self.product_api_url.split('//')[1].split('/')[0])[1]}",
             'scheme': 'https',
             'Accept': 'application/json',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Accept-Language': self.accept_language,
-            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
+            'Authorization': f"Bearer {self.auth_token if self.auth_token is not None else ''}",
             'Content-Type': 'application/json',
             'Origin': self.main_url,
             'Priority': 'u=1, i',
@@ -190,7 +190,7 @@ class ProductFetcher:
             self.auth_token = self.token_manager.get_token_instance()
             if self.auth_token is None:
                 raise FileNotFoundError("Failed to get authorization token.")
-            self.headers['Authorization'] = f'Bearer {self.auth_token}'
+            self.headers['Authorization'] = f"Bearer {self.auth_token}"
 
     def decompress_http_response(self, response_data: bytes, encoding: str) -> bytes:
         """
@@ -216,7 +216,7 @@ class ProductFetcher:
             return response_data
 
     def send_img_obj_to_broker(self, img_url: str, product_id):
-        obj_key = f'{product_id}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}'
+        obj_key = f"{product_id}_{img_url.split('/')[-2]}_{img_url.split('/')[-1]}"
         img_data = {
             "url": img_url,
             "image_category": 'product',
@@ -332,7 +332,7 @@ class ProductFetcher:
                 'reviewsAmount': payload.get('reviewsAmount'),
                 'ordersAmount': payload.get('ordersAmount'),
                 'totalAvailableAmount': payload.get('totalAvailableAmount'),
-                'url': f'{self.main_url}/product/{payload.get("id")}',
+                'url': f"{self.main_url}/product/{payload.get('id')}",
                 # 'photo': image_path,
                 'photo': img_url,
                 'skuList': [{
@@ -461,7 +461,7 @@ class ProductFetcher:
             try:
                 error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                 for error_message in error_messages:
-                    self.logger.warning(f'Response JSON API Error: {error_message}')
+                    self.logger.warning(f"Response JSON API Error: {error_message}")
                     if '429' in error_message:
                         errors.append(429)
                     if '401' in error_message:
@@ -492,7 +492,7 @@ class ProductFetcher:
             if err_code == 401:
                 self.logger.warning(f"{response.status}: Authorization failed during a product {request_type} request; retrieving a new token...")
                 self.auth_token = self.token_manager.get_token_instance()
-                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                self.headers['Authorization'] = f"Bearer {self.auth_token}"
                 if self.request_attempts > 1:
                     self.make_connection(host, pm_timeout=self.current_pm_timeout)
                 else:
@@ -566,7 +566,7 @@ class ProductFetcher:
         """
 
         host = self.product_api_url.split("//")[1].split('/')[0]
-        endpoint_base = self.product_api_url.split(f'https://{host}')[1]
+        endpoint_base = self.product_api_url.split(f"https://{host}")[1]
 
         self.initialize_managers()
 
@@ -590,16 +590,16 @@ class ProductFetcher:
                     'data': data_list
                 }
                 if file_name is None:
-                    file_name = f'{max(0, total_products_count - self.package_size)}-{total_products_count}'
+                    file_name = f"{max(0, total_products_count - self.package_size)}-{total_products_count}"
                 save_to_file(data_to_save,
                              file_name,
-                             f"{self.products_dir}/{datetime.now().strftime("%Y%m%d")}", override_file=True)
+                             f"{self.products_dir}/{datetime.now().strftime('%Y%m%d')}", override_file=True)
 
-        self.logger.info(f'Total products to parse {len(p_ids)}. Parsing...')
+        self.logger.info(f"Total products to parse {len(p_ids)}. Parsing...")
         try:
             while ind < len(p_ids):
                 if self.request_attempts > self.request_retries:
-                    self.logger.error(f'Exceeded max number of {self.request_retries} retries!')
+                    self.logger.error(f"Exceeded max number of {self.request_retries} retries!")
                     break
                 try:
                     if self.proxy_ind % self.batch_size == 0:
@@ -608,8 +608,8 @@ class ProductFetcher:
                         raise ConnectionError("Failed to establish a connection to the server for an API request.")
 
                     product_id = p_ids[ind]
-                    endpoint = f'{endpoint_base}{product_id}'
-                    self.headers['path'] = f'{endpoint}'
+                    endpoint = f"{endpoint_base}{product_id}"
+                    self.headers['path'] = f"{endpoint}"
 
                     self.conn.request("GET", endpoint, headers=self.headers)
                     response = self.conn.getresponse()
@@ -631,7 +631,7 @@ class ProductFetcher:
                             total_products_count += 1
                             product_count += 1
                         else:
-                            self.logger.warning(f'Failed to parse data from JSON for product ID {product_id}: {errors}')
+                            self.logger.warning(f"Failed to parse data from JSON for product ID {product_id}: {errors}")
                             failed_product_ids.append(product_id)
 
                     self.request_attempts = 0
@@ -656,21 +656,21 @@ class ProductFetcher:
                             except Exception as e:
                                 self.logger.error(f"Failed to send to Broker: {e}")
                         data_list = []
-                        self.logger.debug(f'Processed {ind} products.')
+                        self.logger.debug(f"Processed {ind} products.")
 
                 except Exception as e:
-                    self.logger.error(f'Failed to receive data from an API for product ID {p_ids[ind]}: {e}')
+                    self.logger.error(f"Failed to receive data from an API for product ID {p_ids[ind]}: {e}")
                     if self.status >= 30:  # Proxy error
                         break
                     self.request_attempts += 1
                     if self.request_attempts > self.request_retries:
-                        self.logger.error(f'Exceeded max number of {self.request_retries} retries!')
+                        self.logger.error(f"Exceeded max number of {self.request_retries} retries!")
                         break
                     self.wait_with_backoff()
                     self.make_connection(host, pm_timeout=self.current_pm_timeout)
                     continue
         except Exception as e:
-            self.logger.error(f'Error while fetching products: {e}')
+            self.logger.error(f"Error while fetching products: {e}")
             self.status = 1
         finally:
             if self.proxy_manager and self.shut_down_proxy_scheduler:
@@ -680,8 +680,8 @@ class ProductFetcher:
                 self.conn.close()
 
         if data_list:
-            self.logger.info(f'Finished processing {ind} products.')
-            self.logger.info(f'Total products processed for {datetime.now().strftime("%d/%m/%Y")}: {total_products_count}')
+            self.logger.info(f"Finished processing {ind} products.")
+            self.logger.info(f"Total products processed for {datetime.now().strftime('%d/%m/%Y')}: {total_products_count}")
             if send_to_db:
                 data_to_send = {
                     'platform': 'UZUM',
@@ -699,13 +699,13 @@ class ProductFetcher:
                     file_name = str(p_ids[0])
                 save_data_to(data_list, file_name)
         else:
-            self.logger.warning(f'{product_count if product_count else "Zero"} products parsed!')
+            self.logger.warning(f"{product_count if product_count else 'Zero'} products parsed!")
         if failed_product_ids:
-            self.logger.warning(f'Failed to parse {len(failed_product_ids)} products.')
+            self.logger.warning(f"Failed to parse {len(failed_product_ids)} products.")
             if save_data:
                 save_data_to(failed_product_ids, 'failed_product_ids')
         if ind < len(p_ids) and self.status <= 20:
-            self.logger.warning(f'Total products processed for current try is {ind} out of {len(p_ids)}')
+            self.logger.warning(f"Total products processed for current try is {ind} out of {len(p_ids)}")
             self.status = 20
 
         # return total_data_list, failed_product_ids, status
@@ -746,7 +746,7 @@ class ProductFetcher:
             'Accept-Language': 'ru-RU',
             'apollographql-client-name': 'web-customers',
             'apollographql-client-version': '1.25.2',
-            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
+            'Authorization': f"Bearer {self.auth_token if self.auth_token is not None else ''}",
             'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
             'Content-Type': 'application/json',
             'Origin': self.main_url,
@@ -765,7 +765,7 @@ class ProductFetcher:
         try:
             while ind < len(self.no_img_ids):
                 if self.request_attempts > self.request_retries:
-                    self.logger.error(f'Exceeded max number of {self.request_retries} retries during fetching GraphQL image URLs!')
+                    self.logger.error(f"Exceeded max number of {self.request_retries} retries during fetching GraphQL image URLs!")
                     break
 
                 if self.proxy_ind % self.batch_size == 0:
@@ -833,7 +833,7 @@ class ProductFetcher:
             Optional[List[int]]: A list of product IDs or None if loading fails.
             Status: 0 if success
         """
-        product_list = load_last_saved_json(directory=f'{self.data_dir}/{self.product_ids_dir}', file_name=file_name)
+        product_list = load_last_saved_json(directory=f"{self.data_dir}/{self.product_ids_dir}", file_name=file_name)
         if product_list:
             # return product_list[ind:]
             self.logger.info(f"Loaded {len(product_list)} product IDs for fetching.")
@@ -1001,7 +1001,7 @@ if __name__ == "__main__":
         if status >= 30:
             product_fetcher.status = status
     elif args.product_ids:
-        product_fetcher.logger.info(f'Parsing product with ID(s): {args.product_ids}')
+        product_fetcher.logger.info(f"Parsing product with ID(s): {args.product_ids}")
         product_list = args.product_ids
     else:
         product_fetcher.logger.error("No product IDs provided!")
@@ -1017,7 +1017,7 @@ if __name__ == "__main__":
         product_fetcher.logger.info("Sending data to broker is disabled.")
 
     if product_list:
-        product_fetcher.logger.info(f"Starting to parse products from the input. Data language: {product_fetcher.accept_language.split("-")[1]}")
+        product_fetcher.logger.info(f"Starting to parse products from the input. Data language: {product_fetcher.accept_language.split('-')[1]}")
         try:
             # fetched_data, failed_ids, status = product_fetcher.run(product_list)
             status, ind = product_fetcher.run(product_list, args.index if args.index else 0, save_data=args.save, send_data=args.disableBroker)

@@ -154,13 +154,13 @@ def fetch_html(proxy_manager: ProxyManager, url: str, max_retries: int = 5) -> O
                 logger.warning(f"Could not fetch HTML content for category ID {url.split('/')[-1]} in attempt number {attempt_count}. Retrying...")
                 attempt_count += 1
         except Exception as e:
-            logger.error(f'Error fetching HTML: {e}')
+            logger.error(f"Error fetching HTML: {e}")
         finally:
             if driver is not None:
                 try:
                     driver.quit()
                 except Exception as e:
-                    logger.error(f'Error during driver quit: {e}')
+                    logger.error(f"Error during driver quit: {e}")
 
     return html
 
@@ -214,7 +214,7 @@ def get_brands_by_category(proxy_manager: ProxyManager, categories: List[int], u
     """
     brands_by_category = {}
     for category in categories:
-        html_content = fetch_html(proxy_manager, f'{url}{category}')
+        html_content = fetch_html(proxy_manager, f"{url}{category}")
 
         if html_content:
             labels = get_brand_labels(html_content)
@@ -223,7 +223,7 @@ def get_brands_by_category(proxy_manager: ProxyManager, categories: List[int], u
             brands_by_category[category] = labels
         else:
             logger.warning(
-                f'Failed to fetch HTML content for category {category}')
+                f"Failed to fetch HTML content for category {category}")
 
     return brands_by_category
 

@@ -48,15 +48,15 @@ def save_to_file(file: Union[List[Any], Dict[str, Any]],
     Returns:
         None: The function saves the data to the specified file and does not return anything.
     """
-    dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime("%Y%m%d") if separate_folder else ''}"
+    dir_path = f"{data_dir}/{sub_dir}/{datetime.now().strftime('%Y%m%d') if separate_folder else ''}"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     orig_file_name = file_name
     if add_date_time:
-        file_name = f'{file_name}_{datetime.now().strftime("%Y%m%d")}'
+        file_name = f"{file_name}_{datetime.now().strftime('%Y%m%d')}"
 
     if file_type.lower() == "csv":  # or file_type == "":
-        file_path_csv = f'{dir_path}/{file_name}.csv'
+        file_path_csv = f"{dir_path}/{file_name}.csv"
         write_method = 'w' if override_file else 'a'
         with open(file_path_csv, write_method, newline='') as write_file:
             writer = csv.writer(write_file)
@@ -115,16 +115,16 @@ def load_last_saved_csv(directory: str = data_default_dir, file_name: str = "") 
     """
     try:
         if file_name.endswith('.csv'):
-            logger.info(f'Loading {file_name} from {directory}')
+            logger.info(f"Loading {file_name} from {directory}")
             latest_file_path = f"{directory}/{file_name}"
         else:
             list_of_files = glob.glob(os.path.join(
-                directory, f'{file_name}*.csv'))
+                directory, f"{file_name}*.csv"))
             if not list_of_files:
                 raise FileNotFoundError(f"No CSV files found in the {directory}.")
             latest_file_path = max(list_of_files, key=os.path.getctime)
 
-            logger.info(f'Loading {latest_file_path}')
+            logger.info(f"Loading {latest_file_path}")
 
         with open(latest_file_path, newline='') as csvfile:
             reader = csv.reader(csvfile)
@@ -132,7 +132,7 @@ def load_last_saved_csv(directory: str = data_default_dir, file_name: str = "") 
                 int_list = [int(item) for item in row]
         return int_list
     except FileNotFoundError as e:
-        logging.error(f'Failed to load the last saved CSV file: {e}')
+        logging.error(f"Failed to load the last saved CSV file: {e}")
         return None
     except csv.Error:
         logging.error(f"Error decoding CSV from the file {latest_file_path}.")
@@ -152,16 +152,16 @@ def load_last_saved_json(directory: str = data_default_dir, file_name: str = "")
     """
     try:
         if file_name.endswith('.json'):
-            logger.info(f'Loading {file_name} from {directory}')
+            logger.info(f"Loading {file_name} from {directory}")
             latest_file_path = f"{directory}/{file_name}"
         else:
             list_of_files = glob.glob(os.path.join(
-                directory, f'{file_name}*.json'))
+                directory, f"{file_name}*.json"))
             if not list_of_files:
                 raise FileNotFoundError(f"No JSON files found in directory {directory}.")
             latest_file_path = max(list_of_files, key=os.path.getctime)
 
-            logger.info(f'Loading {latest_file_path}')
+            logger.info(f"Loading {latest_file_path}")
 
         with open(latest_file_path, 'r', encoding='utf-8') as file:
             category_dict = json.load(file)
@@ -217,9 +217,9 @@ def load_last_saved_root_categories(directory: str = f"{data_default_dir}/root_c
         with open(latest_file, 'r', encoding='utf-8') as file:
             root_categories = json.load(file)
 
-        logging.info(f'Loaded root-categories from {latest_file}')
+        logging.info(f"Loaded root-categories from {latest_file}")
         return root_categories
 
     except Exception as e:
-        logging.error(f'Failed to load the last saved root-categories: {e}')
+        logging.error(f"Failed to load the last saved root-categories: {e}")
         return None

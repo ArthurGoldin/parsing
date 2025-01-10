@@ -89,7 +89,7 @@ def fetch_data(save_data: bool = False, send_data=True) -> None:
             raise FileNotFoundError("Failed to retrieve product IDs.")
         # p_ids = save_and_load_data.load_last_saved_json(f'{data_dir}/{product_ids_dir}', 'product_ids')
 
-        brands_by_category = load_last_saved_json(f'{data_dir}/{config.get("storage", "brands_sub_dir")}')
+        brands_by_category = load_last_saved_json(f"{data_dir}/{config.get('storage', 'brands_sub_dir')}")
         if not brands_by_category:
             logger.info("No brands stored. Running brands_crawler...")
             run_brands_crawler()

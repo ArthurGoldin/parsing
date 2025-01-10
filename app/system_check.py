@@ -48,7 +48,7 @@ if not os.path.exists(data_dir):
     os.makedirs(data_dir)
 
 # Load Default Configuration from JSON
-default_config = load_json(f'{current_dir}/configs/default_config.json')
+default_config = load_json(f"{current_dir}/configs/default_config.json")
 
 
 def get_config(section: str, option: str) -> Any:
@@ -132,7 +132,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["auth_token"] = "FAILED"
             else:
                 res_stats["auth_token"] = "PASSED"
-            logger.info(f'auth_token: {res_stats["auth_token"]}')
+            logger.info(f"auth_token: {res_stats['auth_token']}")
         except Exception as e:
             res_stats["auth_token"] = "ERROR"
             logger.error(f"Error in token_manager: {e}")
@@ -144,7 +144,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["root_categories"] = "FAILED"
             else:
                 res_stats["root_categories"] = "PASSED"
-            logger.info(f'root_categories: {res_stats["root_categories"]}')
+            logger.info(f"root_categories: {res_stats['root_categories']}")
         except Exception as e:
             res_stats["root_categories"] = "ERROR"
             logger.error(f"Error in root_categories: {e}")
@@ -156,7 +156,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["root_categories(GraphQL request)"] = "FAILED"
             else:
                 res_stats["root_categories(GraphQL request)"] = "PASSED"
-            logger.info(f'root_categories(GraphQL request): {res_stats["root_categories(GraphQL request)"]}')
+            logger.info(f"root_categories(GraphQL request): {res_stats['root_categories(GraphQL request)']}")
         except Exception as e:
             res_stats["root_categories(GraphQL request)"] = "ERROR"
             logger.error(f"Error in root_categories(GraphQL request): {e}")
@@ -168,7 +168,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["leaf_categories"] = "Failed"
             else:
                 res_stats["leaf_categories"] = "PASSED"
-            logger.info(f'leaf_categories: {res_stats["leaf_categories"]}')
+            logger.info(f"leaf_categories: {res_stats['leaf_categories']}")
         except Exception as e:
             res_stats["leaf_categories"] = "ERROR"
             logger.error(f"Error in leaf_categories: {e}")
@@ -181,7 +181,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["product_ids"] = "FAILED"
             else:
                 res_stats["product_ids"] = "PASSED"
-            logger.info(f'product_ids: {res_stats["product_ids"]}')
+            logger.info(f"product_ids: {res_stats['product_ids']}")
         except Exception as e:
             res_stats["product_ids"] = "ERROR"
             logger.error(f"Error in product_ids: {e}")
@@ -195,7 +195,7 @@ def run_system_check(host_name=broker_host, port=broker_port):
                 res_stats["product_parser"] = "FAILED"
             else:
                 res_stats["product_parser"] = "PASSED"
-            logger.info(f'product_parser: {res_stats["product_parser"]}; return status: {status}')
+            logger.info(f"product_parser: {res_stats['product_parser']}; return status: {status}")
         except Exception as e:
             res_stats["product_parser"] = "ERROR"
             logger.error(f"Error in product_parser: {e}")

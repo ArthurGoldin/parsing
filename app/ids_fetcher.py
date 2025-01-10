@@ -130,7 +130,7 @@ class IdsFetcher:
             'Accept-Language': 'ru-RU',
             'apollographql-client-name': 'web-customers',
             'apollographql-client-version': '1.25.2',
-            'Authorization': f'Bearer {self.auth_token if self.auth_token is not None else ""}',
+            'Authorization': f"Bearer {self.auth_token if self.auth_token is not None else ''}",
             'Baggage': 'sentry-environment=production,sentry-release=uzum-market%401.25.2,sentry-public_key=e1a87daa698047a7ace4c53be14f63e8,sentry-trace_id=dcdef1759da34ae6894f8629c5d59343',
             'Content-Type': 'application/json',
             'Origin': self.main_url,
@@ -217,7 +217,7 @@ class IdsFetcher:
             self.auth_token = self.token_manager.get_token_instance()
             if self.auth_token is None:
                 raise FileNotFoundError("Failed to get authorization token.")
-            self.headers['Authorization'] = f'Bearer {self.auth_token}'
+            self.headers['Authorization'] = f"Bearer {self.auth_token}"
 
     def decompress_http_response(self, response_data: bytes, encoding: str) -> bytes:
         """
@@ -365,7 +365,7 @@ class IdsFetcher:
             try:
                 error_messages = [error.get('message', 'Unknown error') for error in json_data['errors']]
                 for error_message in error_messages:
-                    self.logger.warning(f'Response JSON Error: {error_message}')
+                    self.logger.warning(f"Response JSON Error: {error_message}")
                     if '429' in error_message:
                         errors.append(429)
                     if '401' in error_message:
@@ -394,7 +394,7 @@ class IdsFetcher:
             if err_code == 401:
                 self.logger.warning(f"{response.status}: Authorization failed during a category {request_type} request; retrieving a new token...")
                 self.auth_token = self.token_manager.get_token_instance()
-                self.headers['Authorization'] = f'Bearer {self.auth_token}'
+                self.headers['Authorization'] = f"Bearer {self.auth_token}"
                 if self.request_attempts > 1:
                     self.make_connection(host, pm_timeout=self.current_pm_timeout)
                 else:
@@ -516,7 +516,7 @@ class IdsFetcher:
                         done = True
                         amount = json_data.get("data", {}).get("makeSearch", {}).get("total", 0)
 
-                    self.logger.debug(f'Collected {len(data)} of total {len(data_list)} collected items in category {category_id}')
+                    self.logger.debug(f"Collected {len(data)} of total {len(data_list)} collected items in category {category_id}")
 
                     items_offset += min(page_limit, amount - len(data_list))
                     if (len(data_list) >= amount) or (data == prev_data):
@@ -541,7 +541,7 @@ class IdsFetcher:
                     self.request_counter += 1
 
                 except Exception as e:
-                    self.logger.error(f'Failed to receive data from a GraphQL query: {e}')
+                    self.logger.error(f"Failed to receive data from a GraphQL query: {e}")
                     break
         except Exception as e:
             self.logger.error(f"In get_product_ids_by_category: {e}")
@@ -557,7 +557,7 @@ class IdsFetcher:
                 if self.cumulative_save:
                     save_to_file(data_list, self.product_ids_dir, self.product_ids_dir, separate_folder=False, override_file=False)
                 if save_by_category:
-                    save_to_file(data_list, f'category_{category_id}_pr_ids', 'products_by_category', separate_folder=False)
+                    save_to_file(data_list, f"category_{category_id}_pr_ids", "products_by_category", separate_folder=False)
         else:
             self.logger.warning(f"No items collected from category {category_id}.")
 
@@ -631,14 +631,14 @@ class IdsFetcher:
                 if save_data:
                     if p_ids:
                         self.logger.info(f"Saving ids to {self.product_ids_dir}")
-                        save_to_file(p_ids, f"{self.product_ids_dir}{"_final" if self.cumulative_save else ""}", self.product_ids_dir, separate_folder=False, override_file=False)
+                        save_to_file(p_ids, f"{self.product_ids_dir}{'_final' if self.cumulative_save else ''}", self.product_ids_dir, separate_folder=False, override_file=False)
                     if failed_categories:
                         self.logger.info(f"Saving ids to {self.failed_categories_dir}")
                         save_to_file(failed_categories, 'failed_categories_ids', self.failed_categories_dir, separate_folder=False)
 
                 if not p_ids and load_most_recent_if_failed:
                     self.logger.warning(f"Could not fetch product IDs from {self.main_url}, loading most recent saved ids.")
-                    p_ids = load_last_saved_json(f'{self.data_dir}/{self.product_ids_dir}', 'product_ids')
+                    p_ids = load_last_saved_json(f"{self.data_dir}/{self.product_ids_dir}", "product_ids")
             else:
                 raise FileNotFoundError("Failed to get authorization token.")
         except Exception as e:
@@ -691,7 +691,7 @@ class IdsFetcher:
         Returns:
             Optional[List[Dict[str, Any]]]: A list of categories or None if loading fails.
         """
-        categories = load_last_saved_json(directory=f'{self.data_dir}/{self.category_ids_dir}', file_name=file_name)
+        categories = load_last_saved_json(directory=f"{self.data_dir}/{self.category_ids_dir}", file_name=file_name)
         if categories:
             return categories[ind:]
         elif run_root_categories:

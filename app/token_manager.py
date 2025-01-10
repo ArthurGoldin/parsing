@@ -242,7 +242,7 @@ class TokenManager:
                     if self.save_cookies:
                         self.save_cookies_with_path(driver, f"{data_dir}/{self.cookies_path}")
                     if save_logs:
-                        with open(f'{data_dir}/network_logs.json', 'w', encoding='utf-8') as json_file:
+                        with open(f"{data_dir}/network_logs.json", 'w', encoding='utf-8') as json_file:
                             json.dump(logs, json_file, ensure_ascii=False, indent=4)
                             logger.info(f"Network logs saved to: {data_dir}/network_logs.json")
 
