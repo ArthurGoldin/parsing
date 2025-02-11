@@ -762,6 +762,7 @@ class ProductFetcher:
         count = 0
         self.current_pm_timeout = self.proxy_manager_timeout
         self.proxy_ind = 0
+        failed_ids = []
         try:
             while ind < len(self.no_img_ids):
                 if self.request_attempts > self.request_retries:
@@ -795,6 +796,7 @@ class ProductFetcher:
 
                 if not photos:
                     self.logger.warning(f"No image URLs found for product ID {product_id}.")
+                    failed_ids.append(product_id)
 
                 elif len(photos) > 0:
                     img_url = photos[0].get("link", {}).get("low")
@@ -820,6 +822,9 @@ class ProductFetcher:
             self.logger.info(f"Successfully fetched {count} image URLs of total {len(self.no_img_ids)} products with GraphQL queries.")
         else:
             self.logger.warning(f"Failed to fetch image URLs for {len(self.no_img_ids)} products with GraphQL queries.")
+        if len(failed_ids > 0):
+            self.logger.info(f"Saving failed image IDs to file.")
+            save_to_file(failed_ids, "failed_img_ids", f"{self.data_dir}/{self.product_ids_dir}", override_file=True)
 
     def load_ids(self, file_name: str = "", ind: int = 0, run_ids_fetcher: bool = True) -> Optional[Tuple[List[int], int]]:
         """
@@ -897,7 +902,9 @@ class ProductFetcher:
         start_time = time.time()
 
         if p_ids == []:
-            p_ids = self.load_ids()
+            p_ids, load_status = self.load_ids()
+            if p_ids is None or load_status != 0:
+                raise ValueError("No product IDs found!")
         if send_data:
             self.logger.info(f"Sending status to redis")
 
