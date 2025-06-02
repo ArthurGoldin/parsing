@@ -21,7 +21,7 @@ Xvfb $DISPLAY -screen 0 1280x1024x16 -nolisten tcp -auth /dev/null &
 XVFB_PID=$!
 
 # Ensure Xvfb starts correctly
-if ! pidof Xvfb > /dev/null; then
+if ! ps aux | grep '[X]vfb' > /dev/null; then
     echo "Error: Failed to start Xvfb"
     exit 1
 fi

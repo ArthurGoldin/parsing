@@ -1,184 +1,78 @@
     {
         "proxies": [
             {
-                "ip": "108.171.37.242",
+                "ip": "45.11.213.128",
                 "ports": {
-                    "http": 9067,
-                    "https": 9067
+                    "http": 8029,
+                    "https": 8029
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@108.171.37.242:9067",
-                    "https": "user210707:6qml5v@108.171.37.242:9067"
+                    "http": "user210707:6qml5v@45.11.213.128:8029",
+                    "https": "user210707:6qml5v@45.11.213.128:8029"
                 },
-                "exp": 1745250873,
+                "exp": 9999999999,
                 "status": "ACTIVE"
             },
             {
-                "ip": "166.0.209.143",
+                "ip": "45.11.213.213",
                 "ports": {
-                    "http": 9067,
-                    "https": 9067
+                    "http": 8029,
+                    "https": 8029
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@166.0.209.143:9067",
-                    "https": "user210707:6qml5v@166.0.209.143:9067"
+                    "http": "user210707:6qml5v@45.11.213.213:8029",
+                    "https": "user210707:6qml5v@45.11.213.213:8029"
                 },
-                "exp": 1745250873,
+                "exp": 9999999999,
                 "status": "ACTIVE"
             },
             {
-                "ip": "108.171.37.187",
+                "ip": "109.196.104.130",
                 "ports": {
-                    "http": 9067,
-                    "https": 9067
+                    "http": 8029,
+                    "https": 8029
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@108.171.37.187:9067",
-                    "https": "user210707:6qml5v@108.171.37.187:9067"
+                    "http": "user210707:6qml5v@109.196.104.130:8029",
+                    "https": "user210707:6qml5v@109.196.104.130:8029"
                 },
-                "exp": 1745250873,
+                "exp": 9999999999,
                 "status": "ACTIVE"
             },
             {
-                "ip": "108.171.37.38",
+                "ip": "109.196.104.60",
                 "ports": {
-                    "http": 9067,
-                    "https": 9067
+                    "http": 8029,
+                    "https": 8029
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@108.171.37.38:9067",
-                    "https": "user210707:6qml5v@108.171.37.38:9067"
+                    "http": "user210707:6qml5v@109.196.104.60:8029",
+                    "https": "user210707:6qml5v@109.196.104.60:8029"
                 },
-                "exp": 1745250873,
+                "exp": 9999999999,
                 "status": "ACTIVE"
             },
             {
-                "ip": "108.171.37.234",
+                "ip": "109.196.104.125",
                 "ports": {
-                    "http": 9067,
-                    "https": 9067
+                    "http": 8029,
+                    "https": 8029
                 },
                 "user": "user210707",
                 "password": "6qml5v",
                 "proxy_address": {
-                    "http": "user210707:6qml5v@108.171.37.234:9067",
-                    "https": "user210707:6qml5v@108.171.37.234:9067"
+                    "http": "user210707:6qml5v@109.196.104.125:8029",
+                    "https": "user210707:6qml5v@109.196.104.125:8029"
                 },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "108.171.37.71",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@108.171.37.71:9067",
-                    "https": "user210707:6qml5v@108.171.37.71:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.113",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.113:9067",
-                    "https": "user210707:6qml5v@45.11.213.113:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.62",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.62:9067",
-                    "https": "user210707:6qml5v@45.11.213.62:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.245",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.245:9067",
-                    "https": "user210707:6qml5v@45.11.213.245:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.191",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.191:9067",
-                    "https": "user210707:6qml5v@45.11.213.191:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.13",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.13:9067",
-                    "https": "user210707:6qml5v@45.11.213.13:9067"
-                },
-                "exp": 1745250873,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.207",
-                "ports": {
-                    "http": 9067,
-                    "https": 9067
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.207:9067",
-                    "https": "user210707:6qml5v@45.11.213.207:9067"
-
-                },
-                "exp": 1745250873,
+                "exp": 9999999999,
                 "status": "ACTIVE"
             }
         ]
