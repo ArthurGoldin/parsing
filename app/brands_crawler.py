@@ -108,6 +108,33 @@ def fetch_html(proxy_manager: ProxyManager, url: str, max_retries: int = 5) -> O
         driver.get(url)
 
         try:
+            WebDriverWait(driver, 20).until(
+                EC.title_contains("Are you not a robot?"))
+            
+            # Find and click the captcha
+            try:
+                # Try to find the Yandex Smart Captcha element
+                captcha = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".smart-captcha"))
+                )
+                logger.info("Found captcha element, clicking...")
+                captcha.click()
+                logger.info("Captcha clicked successfully")
+                
+                # Wait for the captcha to process
+                time.sleep(3)
+                
+            except Exception as e:
+                logger.warning(f"Could not find or click captcha: {e}")
+            
+            WebDriverWait(driver, 20).until(
+                EC.title_contains("Uzum Market"))
+
+            # Wait for performance logs to be available
+            WebDriverWait(driver, 20).until(
+                lambda d: d.execute_script(
+                    "return window.performance.getEntriesByType('resource').length > 0")
+            )
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located(
                     (By.XPATH, "//div[@id='filters']//ul")
@@ -254,7 +281,7 @@ def run_brands_crawler(proxy_manager: Optional[ProxyManager] = None):
     logger.debug(main_categories)
 
     brands_by_category = get_brands_by_category(proxy_manager, main_categories)
-    # brands_by_category = get_brands_by_category([10020])
+    # brands_by_category = get_brands_by_category(None, [10020])
 
     if brands_by_category:
         # save_dict_to_file(brands_by_category)
