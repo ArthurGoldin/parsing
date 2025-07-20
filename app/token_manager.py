@@ -208,11 +208,31 @@ class TokenManager:
 
             driver.get(self.url)
 
+            # time.sleep(1000)            
             # Wait until the page is fully loaded
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
 
+            WebDriverWait(driver, 20).until(
+                EC.title_contains("Are you not a robot?"))
+            
+            # Find and click the captcha
+            try:
+                # Try to find the Yandex Smart Captcha element
+                captcha = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".smart-captcha"))
+                )
+                logger.info("Found captcha element, clicking...")
+                captcha.click()
+                logger.info("Captcha clicked successfully")
+                
+                # Wait for the captcha to process
+                time.sleep(3)
+                
+            except Exception as e:
+                logger.warning(f"Could not find or click captcha: {e}")
+            
             WebDriverWait(driver, 20).until(
                 EC.title_contains("Uzum Market"))
 
