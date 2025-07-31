@@ -645,7 +645,7 @@ class ProductFetcher:
                     if len(data_list) % self.package_size == 0:
                         if data_list and save_data:
                             save_data_to(data_list)
-                        if send_to_db:
+                        if send_to_db and data_list:
                             data_to_send = {
                                 'platform': 'UZUM',
                                 'date': self.init_time,
