@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.12-slim
+FROM python:3.12
 
 # Set environment variable to avoid issues in headless mode
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,14 +15,43 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     xvfb \
-    linux-headers-amd64 \
-    build-essential \
-    && apt-get clean
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    lsb-release \
+    xdg-utils \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome
-RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-RUN apt install -y ./google-chrome-stable_current_amd64.deb \
-    && rm ./google-chrome-stable_current_amd64.deb
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Chromedriver
 RUN wget -q "https://chromedriver.storage.googleapis.com/$(curl -s chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver_linux64.zip" -O /tmp/chromedriver.zip \
@@ -49,4 +78,4 @@ RUN chmod +x /app/entrypoint.sh
 # Set the entrypoint script
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-CMD ["python3", "system_check.py"]
+CMD ["python3", "main.py"]
