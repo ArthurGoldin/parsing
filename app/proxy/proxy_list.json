@@ -1,79 +1,64 @@
+{
+  "proxies": [
     {
-        "proxies": [
-            {
-                "ip": "45.11.213.128",
-                "ports": {
-                    "http": 8029,
-                    "https": 8029
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.128:8029",
-                    "https": "user210707:6qml5v@45.11.213.128:8029"
-                },
-                "exp": 9999999999,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "45.11.213.213",
-                "ports": {
-                    "http": 8029,
-                    "https": 8029
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@45.11.213.213:8029",
-                    "https": "user210707:6qml5v@45.11.213.213:8029"
-                },
-                "exp": 9999999999,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "109.196.104.130",
-                "ports": {
-                    "http": 8029,
-                    "https": 8029
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@109.196.104.130:8029",
-                    "https": "user210707:6qml5v@109.196.104.130:8029"
-                },
-                "exp": 9999999999,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "109.196.104.60",
-                "ports": {
-                    "http": 8029,
-                    "https": 8029
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@109.196.104.60:8029",
-                    "https": "user210707:6qml5v@109.196.104.60:8029"
-                },
-                "exp": 9999999999,
-                "status": "ACTIVE"
-            },
-            {
-                "ip": "109.196.104.125",
-                "ports": {
-                    "http": 8029,
-                    "https": 8029
-                },
-                "user": "user210707",
-                "password": "6qml5v",
-                "proxy_address": {
-                    "http": "user210707:6qml5v@109.196.104.125:8029",
-                    "https": "user210707:6qml5v@109.196.104.125:8029"
-                },
-                "exp": 9999999999,
-                "status": "ACTIVE"
-            }
-        ]
+      "ip": "185.4.182.66",
+      "ports": {
+        "http": 10034,
+        "https": 10034
+      },
+      "user": "modeler_0ywiOe",
+      "password": "yFGsGgDotq9M",
+      "proxy_address": {
+        "http": "modeler_0ywiOe:yFGsGgDotq9M@185.4.182.66:10034",
+        "https": "modeler_0ywiOe:yFGsGgDotq9M@185.4.182.66:10034"
+      },
+      "exp": 1754784000,
+      "status": "ACTIVE"
+    },
+    {
+      "ip": "185.4.182.66",
+      "ports": {
+        "http": 10035,
+        "https": 10035
+      },
+      "user": "modeler_uPYAwl",
+      "password": "3gz2cgksOnzG",
+      "proxy_address": {
+        "http": "modeler_uPYAwl:3gz2cgksOnzG@185.4.182.66:10035",
+        "https": "modeler_uPYAwl:3gz2cgksOnzG@185.4.182.66:10035"
+      },
+      "exp": 1754784000,
+      "status": "ACTIVE"
+    },
+    {
+      "ip": "185.4.182.66",
+      "ports": {
+        "http": 10036,
+        "https": 10036
+      },
+      "user": "modeler_rM9iL3",
+      "password": "28tpffVoptBU",
+      "proxy_address": {
+        "http": "modeler_rM9iL3:28tpffVoptBU@185.4.182.66:10036",
+        "https": "modeler_rM9iL3:28tpffVoptBU@185.4.182.66:10036"
+      },
+      "exp": 1754784000,
+      "status": "ACTIVE"
+    },
+    {
+      "ip": "185.4.182.66",
+      "ports": {
+        "http": 10037,
+        "https": 10037
+      },
+      "user": "modeler_OTtYgn",
+      "password": "qHyv48Wbgb6f",
+      "proxy_address": {
+        "http": "modeler_OTtYgn:qHyv48Wbgb6f@185.4.182.66:10037",
+        "https": "modeler_OTtYgn:qHyv48Wbgb6f@185.4.182.66:10037"
+      },
+      "exp": 1754784000,
+      "status": "ACTIVE"
     }
+  ]
+}
