@@ -105,8 +105,9 @@ def get_response(headers: Dict[str, str], proxy_manager: Optional[ProxyManager] 
     pass
 
 
-def initialize_managers(proxy_manager: ProxyManager = None, token_manager: TokenManager = None, use_direct_connection: bool = use_direct_connection, **kwargs) -> bool:
+def initialize_managers(proxy_manager: ProxyManager = None, token_manager: TokenManager = None, use_direct_connection: bool = use_direct_connection, **kwargs) -> Tuple[Optional[ProxyManager], Optional[TokenManager], bool]:
     proxy_close = False
+    logger.info(f"use_direct_connection: {use_direct_connection}")
     if not proxy_manager and not use_direct_connection:
         logger.debug("Initializing ProxyManager in root_categories")
         proxy_manager = ProxyManager.from_json_file(proxy_dir)
@@ -172,8 +173,9 @@ def get_category_tree(
         'sec-fetch-site': 'same-site',
         'sentry-trace': 'dcdef1759da34ae6894f8629c5d59343-a55aaf4639abcfa1',
         'User-Agent': ua.random,
-        'x-context': 'null',
-        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7'
+        'x-iid': 'd7e47b3b-1ea6-4b34-9362-d9169f1250e7',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache'
     }
 
     payload_json = load_json(f"{graphql_dir}/{ct_dir}.json")
