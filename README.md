@@ -2,6 +2,49 @@
 
 # Marketplace Parser for [Uzum market](https://uzum.uz)
 
+## 🐍 Virtual Environment Setup
+
+This project uses a Python virtual environment to manage dependencies. Here are several ways to automatically activate it:
+
+### Option 1: VS Code Workspace (Recommended)
+
+Open the project in VS Code using the `parsing.code-workspace` file. The virtual environment will be automatically activated.
+
+### Option 2: Using the Activation Script
+
+```bash
+# Activate virtual environment and set up environment
+source activate.sh
+```
+
+### Option 3: Using direnv (Advanced)
+
+1. Install direnv: `brew install direnv` (macOS) or `sudo apt install direnv` (Ubuntu)
+2. Add to your shell: `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc` (or bash)
+3. Allow the project: `direnv allow`
+4. The virtual environment will activate automatically when you enter the directory
+
+### Option 4: Using Make
+
+```bash
+# Install dependencies
+make install
+
+# Run the application
+make run
+
+# See all available commands
+make help
+```
+
+### Manual Activation
+
+If you prefer manual activation:
+
+```bash
+source .venv/bin/activate
+```
+
 ## Running the Modules Locally
 
 1. Navigate to the `app` folder:
