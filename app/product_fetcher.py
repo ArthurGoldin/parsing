@@ -175,6 +175,7 @@ class ProductFetcher:
             token_retries (int, optional): Maximum retries for the TokenManager. Defaults to 5.
             save_token (bool, optional): Whether to save the token. Defaults to False.
         """
+        self.logger.info(f"use_direct_connection: {self.use_direct_connection}, proxy_manager: {self.proxy_manager}")
         if not self.proxy_manager and not self.use_direct_connection:
             self.logger.debug("Initializing ProxyManager in IdsFetcher")
             self.proxy_manager = ProxyManager.from_json_file(self.proxy_dir)
@@ -304,14 +305,13 @@ class ProductFetcher:
             characteristic_data = payload.get('characteristics', [])
 
             hierarchical_parents = get_hierarchical_parents(payload.get('category', {}))
-
             if payload.get('category', {}).get('title', '').lower() == "Смартфоны Apple iPhone(iOS)".lower():
                 brand = ["Apple"]
             else:
                 oldest_ancestor_id = find_oldest_ancestor(payload)
                 brand_keywords = self.brands_by_category.get(str(oldest_ancestor_id), []) if self.brands_by_category else []
                 brand = find_keywords_in_title(payload.get('title'), brand_keywords) if brand_keywords else []
-
+            
             result: Dict[str, Any] = {
                 'id': payload.get('id'),
                 'title': {
@@ -354,6 +354,7 @@ class ProductFetcher:
                     'id': sku.get('id'),
                     'availableAmount': sku.get('availableAmount'),
                     'fullPrice': sku.get('fullPrice'),
+                    # 'fullPrice': sku.get('purchasePrice')
                     'purchasePrice': sku.get('purchasePrice')
                 } for sku in payload.get('skuList', [])],
                 'seller': [{
@@ -985,7 +986,7 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--index', metavar='START_INDEX', type=int, nargs='?',
                         const=0, help='Index in the categories list to start fetching from.')
 
-    product_fetcher = ProductFetcher()
+    product_fetcher = ProductFetcher(use_direct_connection = True)
     product_fetcher.initialize_managers()
 
     args = parser.parse_args()

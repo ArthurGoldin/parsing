@@ -1,7 +1,11 @@
-import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 import json
 import os
 import pickle
@@ -11,6 +15,7 @@ import time
 import configparser
 from proxy_manager import ProxyManager, ProxyUnavailableError
 import re
+import platform
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logging_config_path = os.path.join(current_dir, 'configs', 'logging.conf')
@@ -18,11 +23,11 @@ config_path = os.path.join(current_dir, 'configs', 'app.conf')
 
 # Configure logging
 try:
-    logging.config.fileConfig(logging_config_path)
-    logger = logging.getLogger('token_manager')
+    from logging_setup import setup_logging
+    logger = setup_logging('token_manager')
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger()
+    logger = logging.getLogger('token_manager')
     logger.warning(f"Could not load logger.conf: {e}; defining default logger.")
 
 
@@ -44,13 +49,15 @@ class TokenManager:
         max_retries=5,
         save_token=False,
         save_cookies=False,
-        cookies_path="cookies/cookies.pkl"
+        cookies_path="cookies/cookies.pkl",
+        save_screenshot=False
     ):
         self.url = url
         self.max_retries = max_retries
         self.save_token = save_token
         self.save_cookies = save_cookies
         self.cookies_path = cookies_path
+        self.save_screenshot = save_screenshot
         self.token = ""
         self.proxy_manager = proxy_manager
         self.use_proxy = True if proxy_manager is not None else False
@@ -59,7 +66,7 @@ class TokenManager:
     def __repr__(self):
         return (f"{self.__class__.__name__}(url='{self.url}', max_retries={self.max_retries}, "
                 f"save_token={self.save_token}, save_cookies={self.save_cookies}, "
-                f"cookies_path='{self.cookies_path}')")
+                f"cookies_path='{self.cookies_path}', save_screenshot={self.save_screenshot})")
 
     def load_saved_token(self, name="uzum"):
         """Load saved token from a file."""
@@ -104,10 +111,17 @@ class TokenManager:
         if isinstance(data, dict):
             for key, value in data.items():
                 if key == target:
-                    if len(value) > 1:
+                    # logger.debug(f"Found {target} key with value: '{value}'")
+                    if isinstance(value, str) and len(value) > 1:
                         words = value.split()
-                        if words[-1] != "undefined":
-                            return words[-1]
+                        # logger.debug(f"Split value into words: {words}")
+                        # Use the same logic as the old working version, but filter out more invalid tokens
+                        last_word = words[-1]
+                        if (last_word not in ["undefined", "null", "Bearer", "Promise]", "[object"] and 
+                            len(last_word) > 5 and 
+                            not last_word.startswith('[object')):
+                            logger.debug(f"Returning token: '{last_word}'")
+                            return last_word  # Return the LAST word like the old version
                 result = self.find_key(value, target)
                 if result is not None:
                     return result
@@ -135,7 +149,7 @@ class TokenManager:
             for key in ["authorization", "access_token"]:
                 token = self.find_key(data, key)
                 if token and self.validate_token(token):
-                    logger.info(f"Authorization token '{key}' received and validated. Proceeding...")
+                    logger.info(f"Authorization token {token[0:5]}...{token[-5:-1]} received and validated. Proceeding...")
                     return token
         return None
 
@@ -164,25 +178,29 @@ class TokenManager:
         return proxy
 
     def init_driver(self, proxy=None):
-        chrome_options = uc.ChromeOptions()
+        """Initialize Chrome WebDriver with anti-detection measures and Docker compatibility."""
+        chrome_options = Options()
+        
+        # Keep it simple like the old working version
         chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-        # Added for Docker (needed?)
+        
+        # Essential Docker options only
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-
-        # Added while implementing proxy
+        
+        # Essential anti-detection (same as old version)
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_argument("--ignore-certificate-errors")
-
-        # chrome_options.add_argument('--remote-debugging-port=9222')  # Use a fixed port
+        
+        # Basic display options (same as old version)
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1280,1024')
 
+        # Handle proxy configuration
         if proxy is not None:
             logger.info("Adding proxy extension...")
             ext_path = self.proxy_manager.create_proxy_auth_extension(proxy)
             if ext_path:
-                # chrome_options.add_extension(ext_path)
                 try:
                     if ext_path.endswith('proxy_auth_extension.zip'):
                         ext_path = ext_path.split('proxy_auth_extension.zip')[0]
@@ -194,7 +212,134 @@ class TokenManager:
             else:
                 logger.warning(f"Failed to create proxy authentication extension for proxy {proxy.ip}")
 
-        return uc.Chrome(options=chrome_options)
+        try:
+            # Use webdriver-manager to handle ChromeDriver automatically
+            chromedriver_path = ChromeDriverManager().install()
+            
+            # Fix the common issue with THIRD_PARTY_NOTICES.chromedriver path
+            if chromedriver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
+                chromedriver_path = chromedriver_path.replace('THIRD_PARTY_NOTICES.chromedriver', 'chromedriver')
+            
+            # Ensure the chromedriver has execute permissions
+            os.chmod(chromedriver_path, 0o755)
+            
+            service = Service(chromedriver_path)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+        except Exception as e:
+            logger.warning(f"webdriver-manager failed: {e}, trying fallback options")
+            
+            # Level 2: Try system ChromeDriver paths
+            fallback_paths = [
+                '/usr/bin/chromedriver',                 # System path
+                '/usr/local/bin/chromedriver',           # Alternative system path
+                '/opt/chromedriver',                     # Docker alternative
+            ]
+            
+            driver = None
+            for chromedriver_path in fallback_paths:
+                if os.path.exists(chromedriver_path):
+                    try:
+                        logger.info(f"Trying fallback ChromeDriver: {chromedriver_path}")
+                        os.chmod(chromedriver_path, 0o755)
+                        service = Service(chromedriver_path)
+                        driver = webdriver.Chrome(service=service, options=chrome_options)
+                        logger.info(f"Successfully using fallback ChromeDriver: {chromedriver_path}")
+                        break
+                    except Exception as fallback_error:
+                        logger.warning(f"Fallback ChromeDriver {chromedriver_path} failed: {fallback_error}")
+                        continue
+            
+            # Level 3: Last resort - try system ChromeDriver without explicit path
+            if driver is None:
+                logger.warning("All fallback ChromeDrivers failed, trying system PATH")
+                driver = webdriver.Chrome(options=chrome_options)
+        
+        return driver
+
+    def save_screenshot(self, driver, filename):
+        """Save screenshot for debugging purposes."""
+        if not self.save_screenshot:
+            return
+        
+        try:
+            screenshot_dir = f"{data_dir}/screenshots"
+            if not os.path.exists(screenshot_dir):
+                os.makedirs(screenshot_dir)
+            
+            screenshot_path = os.path.join(screenshot_dir, filename)
+            driver.save_screenshot(screenshot_path)
+            logger.info(f"Screenshot saved: {screenshot_path}")
+        except Exception as e:
+            logger.error(f"Failed to save screenshot: {e}")
+
+    def solve_captcha(self, driver):
+        """Enhanced captcha solving with multiple strategies."""
+        try:
+            # Strategy 1: Direct captcha element detection
+            captcha_selectors = [
+                ".smart-captcha",
+                "[data-testid='captcha']",
+                ".captcha-container",
+                "#captcha",
+                ".yandex-captcha"
+            ]
+            
+            for selector in captcha_selectors:
+                try:
+                    captcha = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    logger.info(f"Found captcha with selector: {selector}")
+                    
+                    # Try ActionChains for better interaction
+                    actions = ActionChains(driver)
+                    actions.move_to_element(captcha).click().perform()
+                    logger.info("Captcha clicked with ActionChains")
+                    time.sleep(3)
+                    return True
+                    
+                except Exception:
+                    continue
+            
+            # Strategy 2: Check for iframes with captcha
+            try:
+                iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                for iframe in iframes:
+                    try:
+                        driver.switch_to.frame(iframe)
+                        captcha = driver.find_element(By.CSS_SELECTOR, ".smart-captcha")
+                        captcha.click()
+                        logger.info("Captcha clicked inside iframe")
+                        driver.switch_to.default_content()
+                        time.sleep(3)
+                        return True
+                    except Exception:
+                        driver.switch_to.default_content()
+                        continue
+                        
+            except Exception as e:
+                logger.debug(f"Iframe captcha strategy failed: {e}")
+            
+            # Strategy 3: Fallback - look for any clickable element that might be captcha
+            try:
+                captcha = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//*[contains(@class, 'captcha') or contains(@id, 'captcha')]"))
+                )
+                captcha.click()
+                logger.info("Captcha clicked with fallback xpath")
+                time.sleep(3)
+                return True
+                
+            except Exception:
+                pass
+                
+            logger.warning("Could not find any captcha elements with any strategy")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error in captcha solving: {e}")
+            return False
 
     def get_token_instance(self, save_logs: bool = False) -> str:
         """
@@ -205,42 +350,59 @@ class TokenManager:
         """
 
         def get_response(driver):
-
             driver.get(self.url)
 
-            # time.sleep(1000)            
             # Wait until the page is fully loaded
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
 
-            WebDriverWait(driver, 20).until(
-                EC.title_contains("Are you not a robot?"))
-            
-            # Find and click the captcha
+            # Save screenshot for debugging if enabled
+            if self.save_screenshot:
+                self.save_screenshot(driver, f"page_load_{int(time.time())}.png")
+
+            # Check if captcha page is shown
             try:
-                # Try to find the Yandex Smart Captcha element
-                captcha = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".smart-captcha"))
-                )
-                logger.info("Found captcha element, clicking...")
-                captcha.click()
-                logger.info("Captcha clicked successfully")
+                WebDriverWait(driver, 20).until(
+                    EC.title_contains("Are you not a robot?"))
                 
-                # Wait for the captcha to process
-                time.sleep(3)
-                
+                # Use enhanced captcha solving
+                if self.solve_captcha(driver):
+                    logger.info("Captcha solved successfully")
+                else:
+                    logger.warning("Failed to solve captcha with all strategies")
+                    
             except Exception as e:
-                logger.warning(f"Could not find or click captcha: {e}")
-            
+                logger.debug(f"No captcha detected or different page structure: {e}")
+
+            # Wait for the main page to load
             WebDriverWait(driver, 20).until(
                 EC.title_contains("Uzum Market"))
+
+            # Save screenshot after captcha if enabled
+            if self.save_screenshot:
+                self.save_screenshot(driver, f"after_captcha_{int(time.time())}.png")
 
             # Wait for performance logs to be available
             WebDriverWait(driver, 20).until(
                 lambda d: d.execute_script(
                     "return window.performance.getEntriesByType('resource').length > 0")
             )
+            
+            # # Give more time for the page to fully initialize and authenticate
+            # # The old undetected_chromedriver might have been handling this differently
+            # logger.debug("Waiting for page to fully initialize...")
+            # time.sleep(1)  # Longer initial wait like the old version
+            
+            # # Try to trigger any remaining authentication by interacting with the page
+            # try:
+            #     # Scroll to trigger any lazy-loaded authentication
+            #     driver.execute_script("window.scrollTo(0, 100);")
+            #     time.sleep(2)
+            #     driver.execute_script("window.scrollTo(0, 0);")
+            #     time.sleep(3)
+            # except Exception as e:
+            #     logger.debug(f"Page interaction failed: {e}")
 
             return driver.get_log("performance")
 
